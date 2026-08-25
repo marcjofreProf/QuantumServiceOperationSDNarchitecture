@@ -12,7 +12,6 @@ echo "=================================================================="
 echo "[*] Verifying system dependencies..."
 SYSTEM_DEPS=()
 
-# Check for ensurepip instead of venv --help (prevents Ubuntu false positives)
 if ! python3 -c "import ensurepip" &>/dev/null; then
     SYSTEM_DEPS+=("python3-venv")
 fi
@@ -52,11 +51,10 @@ fi
 
 # 3. Directory Structure Verification
 echo "[*] Verifying project structure..."
-mkdir -p src/api/proto src/api/yang src/api/grpc src/api/restconf charm scripts config
+mkdir -p src/api/proto src/api/yang src/api/grpc src/api/restconf charm scripts config tests
 
 # 4. Virtual Environment Provisioning
 VENV_DIR=".venv"
-# Recreate .venv if pip is missing (cleans broken previous attempts)
 if [ -d "$VENV_DIR" ] && [ ! -f "${VENV_DIR}/bin/pip" ]; then
     echo "[!] Incomplete virtual environment detected. Cleaning up..."
     rm -rf "$VENV_DIR"
@@ -130,8 +128,9 @@ fi
 echo "[*] Setting execution permissions on scripts..."
 chmod +x scripts/*.py 2>/dev/null || true
 chmod +x scripts/*.sh 2>/dev/null || true
+chmod +x tests/*.sh 2>/dev/null || true
 
-# 9. Compile grpc stubs
+# 9. Compile gRPC Stubs
 echo "[*] Compiling gRPC stubs..."
 ./.venv/bin/python3 -m grpc_tools.protoc \
   -I./src/api/proto \
@@ -141,4 +140,5 @@ echo "[*] Compiling gRPC stubs..."
 
 echo "=================================================================="
 echo "[+] Bootstrap complete! System and local environment ready."
+echo "[+] Optional Juju tests available in ./tests/"
 echo "=================================================================="
