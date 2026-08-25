@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package quantum.terminal.gnoi.v1;
+package quantum.switch.v1;
 
-service TerminalQuantumGnoiSwitchingService {
+service QuantumSwitchService {
   rpc SetCrossConnect (CrossConnectRequest) returns (CrossConnectResponse);
-  rpc GetSwitchStatus (StatusRequest) returns (StatusResponse);
+  rpc GetCrossConnectStatus (StatusRequest) returns (StatusResponse);
 }
 
 message CrossConnectRequest {
