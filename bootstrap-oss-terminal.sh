@@ -51,7 +51,8 @@ fi
 
 # 3. Juju Controller & Local Cloud Provisioning (LXD)
 echo "[*] Verifying Juju Controller..."
-if juju controllers 2>&1 | grep -qi "No controllers registered"; then
+CONTROLLERS_OUT=$(juju controllers 2>&1 || true)
+if echo "$CONTROLLERS_OUT" | grep -qi "No controllers registered"; then
     echo "[!] No Juju controller registered. Setting up local LXD cloud..."
     
     # Check if LXD is missing OR if the background socket is broken (WSL edge case)
