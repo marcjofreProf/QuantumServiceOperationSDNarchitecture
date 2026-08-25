@@ -49,11 +49,35 @@ else
     echo "  -> Charmcraft is installed: $(charmcraft --version)"
 fi
 
-# 3. Directory Structure Verification
+# 3. Juju Controller & Local Cloud Provisioning
+echo "[*] Verifying Juju Controller..."
+if ! juju controllers --format=yaml 2>/dev/null | grep -q 'controllers:'; then
+    echo "[!] No Juju controller registered. Setting up local LXD cloud..."
+    
+    if ! command -v lxd &>/dev/null; then
+        echo "  -> Installing LXD..."
+        sudo snap install lxd
+        sudo lxd init --auto
+    fi
+    
+    echo "  -> Bootstrapping local Juju controller (terminal-controller)..."
+    juju bootstrap localhost terminal-controller || {
+        echo "[!] Failed to bootstrap Juju controller."
+        echo "[!] You may need to add your user to the lxd group and reload your shell:"
+        echo "    sudo usermod -aG lxd \$USER"
+        echo "    newgrp lxd"
+        echo "    juju bootstrap localhost terminal-controller"
+        exit 1
+    }
+else
+    echo "  -> Juju controller is active."
+fi
+
+# 4. Directory Structure Verification
 echo "[*] Verifying project structure..."
 mkdir -p src/api/proto src/api/yang src/api/grpc src/api/restconf charm scripts config tests
 
-# 4. Virtual Environment Provisioning
+# 5. Virtual Environment Provisioning
 VENV_DIR=".venv"
 if [ -d "$VENV_DIR" ] && [ ! -f "${VENV_DIR}/bin/pip" ]; then
     echo "[!] Incomplete virtual environment detected. Cleaning up..."
@@ -71,7 +95,7 @@ VENV_PYTHON="${VENV_DIR}/bin/python3"
 VENV_PIP="${VENV_DIR}/bin/pip"
 VENV_PYANG="${VENV_DIR}/bin/pyang"
 
-# 5. Dependency Installation
+# 6. Dependency Installation
 echo "[*] Upgrading pip and installing dependencies..."
 "$VENV_PIP" install --upgrade pip setuptools wheel
 
@@ -90,7 +114,7 @@ else
         pyyaml
 fi
 
-# 6. Compile Protobuf Schemas
+# 7. Compile Protobuf Schemas
 PROTO_DIR="src/api/proto"
 GRPC_OUT_DIR="src/api/grpc"
 
@@ -110,7 +134,7 @@ else
     echo "[!] No .proto files found in ${PROTO_DIR}/. Skipping gRPC compilation."
 fi
 
-# 7. Validate YANG Schemas
+# 8. Validate YANG Schemas
 YANG_DIR="src/api/yang"
 
 echo "[*] Validating YANG models..."
@@ -124,13 +148,13 @@ else
     echo "[!] No .yang files found in ${YANG_DIR}/. Skipping YANG validation."
 fi
 
-# 8. Apply Execution Permissions
+# 9. Apply Execution Permissions
 echo "[*] Setting execution permissions on scripts..."
 chmod +x scripts/*.py 2>/dev/null || true
 chmod +x scripts/*.sh 2>/dev/null || true
 chmod +x tests/*.sh 2>/dev/null || true
 
-# 9. Compile gRPC Stubs
+# 10. Compile gRPC Stubs
 echo "[*] Compiling gRPC stubs..."
 ./.venv/bin/python3 -m grpc_tools.protoc \
   -I./src/api/proto \
