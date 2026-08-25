@@ -40,7 +40,7 @@ This terminal agent operates on a dual-protocol model to align with modern telec
 
 *Example Usage:* To dynamically query the real-time status of a switching node on the data plane, the terminal or Juju charm executes:
    ```bash
-   python3 scripts/gnoi-switching-client.py <NODE_IP> status
+   python3 scripts/terminal-gnoi-switching-client.py <NODE_IP> status
 
 ## Installation & Bootstrapping
 Clone the repository and run the bootstrap script to create your virtual environment, install dependencies, and compile the necessary gRPC and YANG schemas:
@@ -51,4 +51,12 @@ sudo chmod +x ./bootstrap-oss-terminal.sh
 ./bootstrap-oss-terminal.sh
 
 
-   
+## The Cleanup Script (`uninstall-bootstrap-oss-terminal.sh`)
+This script safely tears down the local environment, returning your repository to a perfectly clean state. It is useful for troubleshooting, resetting your setup, or preparing the directory for a fresh commit.
+
+When executed, it safely removes all generated artifacts:
+*   **Removes the Environment:** Deletes the isolated `.venv/` directory.
+*   **Cleans gRPC Stubs:** Deletes all auto-generated Python Protobuf files (`*_pb2.py` and `*_pb2_grpc.py`).
+*   **Cleans YANG Trees:** Deletes all generated `.tree` visualization files.
+*   **Clears System Cache:** Recursively wipes all `__pycache__` directories and compiled Python bytecode (`.pyc`).
+*   **Revokes Permissions:** Removes execution rights from the `scripts/` directory to prevent accidental execution in a broken state.
