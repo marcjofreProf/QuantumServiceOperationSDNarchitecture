@@ -8,11 +8,52 @@ echo "=================================================================="
 echo "  Bootstrapping QuantumServiceOperationSDNarchitecture Environment"
 echo "=================================================================="
 
-# 1. Directory Structure Verification
+# 1. System Dependency Checks & Fixes (python3-venv, pip)
+echo "[*] Verifying system dependencies..."
+SYSTEM_DEPS=()
+
+if ! python3 -m venv --help &>/dev/null; then
+    SYSTEM_DEPS+=("python3-venv")
+fi
+
+if ! command -v pip3 &>/dev/null; then
+    SYSTEM_DEPS+=("python3-pip")
+fi
+
+if [ ${#SYSTEM_DEPS[@]} -ne 0 ]; then
+    echo "[!] Missing system packages: ${SYSTEM_DEPS[*]}"
+    echo "[*] Installing missing system packages via apt..."
+    sudo apt-get update -y
+    sudo apt-get install -y "${SYSTEM_DEPS[@]}"
+fi
+
+# 2. Canonical Juju & Charmcraft Tooling Check / Auto-Install
+echo "[*] Verifying Canonical Juju tooling..."
+if ! command -v juju &>/dev/null; then
+    echo "[!] Juju CLI not found. Installing via snap..."
+    if command -v snap &>/dev/null; then
+        sudo snap install juju --classic --channel=3.x/stable
+    else
+        echo "[!] Snap package manager not found. Please install Juju manually."
+    fi
+else
+    echo "  -> Juju CLI is installed: $(juju --version)"
+fi
+
+if ! command -v charmcraft &>/dev/null; then
+    echo "[!] Charmcraft not found. Installing via snap..."
+    if command -v snap &>/dev/null; then
+        sudo snap install charmcraft --classic
+    fi
+else
+    echo "  -> Charmcraft is installed: $(charmcraft --version)"
+fi
+
+# 3. Directory Structure Verification
 echo "[*] Verifying project structure..."
 mkdir -p src/api/proto src/api/yang src/api/grpc src/api/restconf charm scripts config
 
-# 2. Virtual Environment Provisioning
+# 4. Virtual Environment Provisioning
 VENV_DIR=".venv"
 if [ ! -d "$VENV_DIR" ]; then
     echo "[*] Creating isolated Python environment in ${VENV_DIR}..."
@@ -25,7 +66,7 @@ VENV_PYTHON="${VENV_DIR}/bin/python"
 VENV_PIP="${VENV_DIR}/bin/pip"
 VENV_PYANG="${VENV_DIR}/bin/pyang"
 
-# 3. Dependency Installation
+# 5. Dependency Installation
 echo "[*] Upgrading pip and installing dependencies..."
 "$VENV_PIP" install --upgrade pip setuptools wheel
 
@@ -44,7 +85,7 @@ else
         pyyaml
 fi
 
-# 4. Compile Protobuf Schemas
+# 6. Compile Protobuf Schemas
 PROTO_DIR="src/api/proto"
 GRPC_OUT_DIR="src/api/grpc"
 
@@ -64,7 +105,7 @@ else
     echo "[!] No .proto files found in ${PROTO_DIR}/. Skipping gRPC compilation."
 fi
 
-# 5. Validate YANG Schemas
+# 7. Validate YANG Schemas
 YANG_DIR="src/api/yang"
 
 echo "[*] Validating YANG models..."
@@ -78,11 +119,11 @@ else
     echo "[!] No .yang files found in ${YANG_DIR}/. Skipping YANG validation."
 fi
 
-# 6. Apply Execution Permissions
+# 8. Apply Execution Permissions
 echo "[*] Setting execution permissions on scripts..."
 chmod +x scripts/*.py 2>/dev/null || true
 chmod +x scripts/*.sh 2>/dev/null || true
 
 echo "=================================================================="
-echo "[+] Bootstrap complete! Scripts in ./scripts/ are ready to run."
+echo "[+] Bootstrap complete! System and local environment ready."
 echo "=================================================================="
