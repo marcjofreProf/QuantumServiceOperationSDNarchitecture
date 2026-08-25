@@ -42,6 +42,15 @@ This terminal agent operates on a dual-protocol model to align with modern telec
    ```bash
    python3 scripts/terminal-gnoi-switching-client.py <NODE_IP> status
 
+2. High-Level Service Orchestration (YANG / RESTCONF via Juju):
+Utilized for intent-based provisioning by automatically translating orchestrator intents into local terminal configurations. The terminal maps these underlying network data models into standard YANG schemas and transmits them via RESTCONF to the controller.
+
+* Compile the YANG tree and deploy the Juju charm
+./tests/deploy-juju-example-terminal.sh
+
+* Trigger the RESTCONF service provisioning action
+./tests/test-juju-example-switching-action.sh
+
 ## Installation & Bootstrapping
 Clone the repository and run the bootstrap script to create your virtual environment, install dependencies, and compile the necessary gRPC and YANG schemas:
 
