@@ -64,19 +64,12 @@ if ! juju controllers --format=yaml 2>/dev/null | grep -q 'controllers:'; then
     echo "  -> Initializing local LXD cloud..."
     sudo lxd init --auto || true
     
-    # Group permissions check for LXD
-    if ! groups "$USER" | grep -q '\blxd\b'; then
+    # Check for LXD group membership; if missing, add user and re-exec seamlessly
+    if ! id -nG "$USER" | grep -qw "lxd"; then
         echo "  -> Adding $USER to the lxd group..."
         sudo usermod -aG lxd "$USER"
-        echo "=================================================================="
-        echo "[!] ACTION REQUIRED: Your user was added to the 'lxd' group."
-        echo "[!] Linux requires you to reload your group permissions."
-        echo "[!] Please run the following command to continue:"
-        echo ""
-        echo "    newgrp lxd && ./bootstrap-oss-terminal.sh"
-        echo ""
-        echo "=================================================================="
-        exit 0
+        echo "  -> Elevating group permissions and restarting bootstrap process..."
+        exec sg lxd "$0 $*"
     fi
     
     echo "  -> Bootstrapping local Juju controller (terminal-controller)..."
