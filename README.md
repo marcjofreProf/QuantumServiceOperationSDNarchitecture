@@ -46,7 +46,7 @@ This terminal agent operates on a dual-protocol model to align with modern telec
 Utilized for intent-based provisioning by automatically translating orchestrator intents into local terminal configurations. The terminal maps these underlying network data models into standard YANG schemas and transmits them via RESTCONF to the controller.
 
 * Compile the YANG tree and deploy the Juju charm
-./tests/deploy-juju-example-terminal.sh
+./tests/deploy-juju-example-switching-terminal.sh
 
 * Trigger the RESTCONF service provisioning action
 ./tests/test-juju-example-switching-action.sh
