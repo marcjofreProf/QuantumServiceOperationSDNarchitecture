@@ -10,12 +10,44 @@ This project works in tandem with the central control plane repository: [Quantum
 
 ```text
 QuantumServiceOperationSDNarchitecture/
+├── charm/               # Canonical Juju charm definitions and hooks
 ├── config/              # Deployment profiles and configuration templates
 ├── docs/                # System documentation
+├── scripts/             # Day-1/Day-2 operational scripts (e.g., gnoi-switching-client.py)
 ├── src/                 # Core source code for the terminal agent
-│   ├── api/             # SDN controller communication interfaces
+│   ├── api/             
+│   │   ├── yang/        # YANG models for RESTCONF
+│   │   ├── proto/       # Protobuf files for gRPC/gNMI
+│   │   ├── restconf/    # RESTCONF client & server implementations
+│   │   └── grpc/        # Generated gRPC code & client stubs
 │   ├── core/            # Quantum resource lifecycle and connection management
 │   └── hardware/        # Hardware abstraction layer (memories, transceivers)
 ├── tests/               # Unit tests
-├── README.md            # This documentation
-└── requirements.txt     # Project dependencies
+├── bootstrap-oss-terminal.sh            # Setup script (venv, dependencies, schemas)
+├── uninstall-bootstrap-oss-terminal.sh  # Cleanup script
+└── requirements.txt     # Python project dependencies
+
+## Orchestration via Canonical Juju
+
+To seamlessly integrate with ETSI OSM and Kubernetes, this architecture is wrapped and managed using **Canonical Juju**. Operating as the VCA (VNF Configuration and Abstraction) engine, Juju charms map our underlying network data models to higher-level orchestrator inputs. Juju handles lifecycle operations, automatically translating orchestrator intents into local terminal configurations and executing operational scripts.
+
+## SDN Protocol Architecture: Protobuf & YANG
+
+This terminal agent operates on a dual-protocol model to align with modern telecom SDN standards, effectively separating the control and management planes:
+
+1. **High-Speed Control & Operations (gRPC / Protobuf):**
+   Utilized for dynamic, low-latency quantum operations, such as fast path switching, entanglement request sessions, and continuous telemetry streaming. We leverage standard **gNOI** (gRPC Network Operations Interface) and **gNMI** (gRPC Network Management Interface) protocols.
+
+*Example Usage:* To dynamically query the real-time status of a switching node on the data plane, the terminal or Juju charm executes:
+   ```bash
+   python3 scripts/gnoi-switching-client.py <NODE_IP> status
+
+## Installation & Bootstrapping
+Clone the repository and run the bootstrap script to create your virtual environment, install dependencies, and compile the necessary gRPC and YANG schemas:
+
+git clone git clone https://github.com/marcjofreProf/QuantumServiceOperationSDNarchitecture.git
+cd QuantumServiceOperationSDNarchitecture
+./bootstrap-oss-terminal.sh
+
+
+   
