@@ -1,62 +1,58 @@
-#!/bin/sh
-''''exec "$(dirname "$0")/../.venv/bin/python3" "$0" "$@" # '''
-# --- Python Code Starts Below ---
-
+#!/usr/bin/env python3
 import sys
 import os
-import argparse
+import grpc
 
-# Inject src/api/grpc into Python path for generated stubs
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-GRPC_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "../src/api/grpc"))
-sys.path.insert(0, GRPC_DIR)
+# Add proto directory to path if needed
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    import grpc
-    import terminal_quantum_gnoi_switching_pb2 as pb2
-    import terminal_quantum_gnoi_switching_pb2_grpc as pb2_grpc
-    STUBS_AVAILABLE = True
+    import proto.quantum_gnoi_switching_pb2 as pb2
+    import proto.quantum_gnoi_switching_pb2_grpc as pb2_grpc
 except ImportError:
-    STUBS_AVAILABLE = False
+    import quantum_gnoi_switching_pb2 as pb2
+    import quantum_gnoi_switching_pb2_grpc as pb2_grpc
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Quantum Terminal gNOI Switching Client"
-    )
-    parser.add_argument("node_ip", help="Target IP address of the Quantum Switching Node")
-    parser.add_argument(
-        "command", 
-        choices=["status", "connect", "disconnect"], 
-        help="gNOI operation to perform"
-    )
-    parser.add_argument("--port", default="50051", help="gRPC server port (default: 50051)")
+    if len(sys.argv) < 3:
+        print("Usage: ./terminal-gnoi-switching-client.py <NODE_IP> <status|connect|disconnect>")
+        sys.exit(1)
 
-    args = parser.parse_args()
+    node_ip = sys.argv[1]
+    command = sys.argv[2].lower()
+    target_addr = f"{node_ip}:50051"
 
-    target_address = f"{args.node_ip}:{args.port}"
-    print(f"[*] Target Node Address: {target_address}")
-    print(f"[*] Command: {args.command}")
-    print(f"[*] Python Interpreter: {sys.executable}")
-    print(f"[*] Compiled gRPC Stubs Loaded: {STUBS_AVAILABLE}")
+    print(f"[*] Target Node Address: {target_addr}")
+    print(f"[*] Command: {command}")
 
-    if not STUBS_AVAILABLE:
-        print("[!] Warning: gRPC stubs not compiled yet. Run './bootstrap-oss-terminal.sh' first.")
-        return
+    channel = grpc.insecure_channel(target_addr)
+    stub = pb2_grpc.QuantumGnoiSwitchingServiceStub(channel)
 
-    # Mock execution flow (Ready for live gRPC channel connection)
-    if args.command == "status":
-        request = pb2.SwitchStatusRequest(terminal_id="terminal-edge-01")
-        print(f"[+] Formatted Protobuf Request:\n{request}")
-    elif args.command in ["connect", "disconnect"]:
-        is_connect = (args.command == "connect")
-        request = pb2.CrossConnectRequest(
-            session_id="sess-qsdn-1001",
-            input_port=1,
-            output_port=2,
-            connect_state=is_connect,
-            resource_type=pb2.RESOURCE_TYPE_EPR_PAIR
-        )
-        print(f"[+] Formatted Protobuf Request:\n{request}")
+    try:
+        if command == "status":
+            # Empty StatusRequest matching node schema
+            request = pb2.StatusRequest()
+            print(f"[+] Sending Protobuf Request: StatusRequest()")
+            response = stub.GetCrossConnectStatus(request, timeout=5)
+            print(f"[+] Status Response: connected={response.is_connected}, switch_type='{response.switch_type}'")
+
+        elif command in ["connect", "enable", "on"]:
+            request = pb2.CrossConnectRequest(state=True)
+            print(f"[+] Sending Protobuf Request: CrossConnectRequest(state=True)")
+            response = stub.SetCrossConnect(request, timeout=5)
+            print(f"[+] Response: success={response.success}, message='{response.message}'")
+
+        elif command in ["disconnect", "disable", "off"]:
+            request = pb2.CrossConnectRequest(state=False)
+            print(f"[+] Sending Protobuf Request: CrossConnectRequest(state=False)")
+            response = stub.SetCrossConnect(request, timeout=5)
+            print(f"[+] Response: success={response.success}, message='{response.message}'")
+
+        else:
+            print(f"[-] Unknown command '{command}'. Use 'status', 'connect', or 'disconnect'.")
+
+    except grpc.RpcError as e:
+        print(f"[-] gRPC Error ({e.code()}): {e.details()}")
 
 if __name__ == "__main__":
     main()
