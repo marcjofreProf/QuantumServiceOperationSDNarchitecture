@@ -1,0 +1,49 @@
+module example-quantum-switching-terminal-service {
+  yang-version 1.1;
+  namespace "urn:example:yang:quantum-switching-terminal-service";
+  prefix eqsts;
+
+  organization "Quantum SDQN Architecture Group";
+  description "Example YANG definition for quantum terminal cross-connect provisioning.";
+
+  revision "2026-08-25" {
+    description "Initial example release for service operation layer.";
+  }
+
+  container quantum-services {
+    description "Example top-level container for quantum network services.";
+
+    list cross-connect-service {
+      key "service-id";
+
+      leaf service-id {
+        type string;
+        description "Unique identifier for the cross-connect request.";
+      }
+
+      leaf target-node-ip {
+        type string;
+        description "IP address of the target quantum switch node (e.g., 10.0.0.254).";
+      }
+
+      leaf ingress-port {
+        type uint32;
+        description "Ingress optical/qubit port ID.";
+      }
+
+      leaf egress-port {
+        type uint32;
+        description "Egress optical/qubit port ID.";
+      }
+
+      leaf admin-state {
+        type enumeration {
+          enum ENABLED;
+          enum DISABLED;
+        }
+        default ENABLED;
+        description "Administrative state of the quantum channel.";
+      }
+    }
+  }
+}
