@@ -32,7 +32,8 @@ echo "[*] Verifying Canonical Juju tooling..."
 if ! command -v juju &>/dev/null; then
     echo "[!] Juju CLI not found. Installing via snap..."
     if command -v snap &>/dev/null; then
-        sudo snap install juju --classic --channel=3.x/stable
+        # Fixed: Changed from 3.x/stable to 3/stable
+        sudo snap install juju --classic --channel=3/stable
     else
         echo "[!] Snap package manager not found. Please install Juju manually."
     fi
