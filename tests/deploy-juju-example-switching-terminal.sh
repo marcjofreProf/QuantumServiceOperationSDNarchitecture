@@ -18,7 +18,15 @@ else
     pyang -f tree src/api/yang/example-quantum-switching-terminal-service.yang -o src/api/yang/example-quantum-switching-terminal-service.tree
 fi
 
-# 2. Deploy the example terminal charm
+# 2. Build the charm (NEW STEP)
+echo "[*] Packing the charm with Charmcraft..."
+cd charm/
+charmcraft pack
+# Rename the dynamically generated file to exactly what the script expects
+mv *.charm quantum-terminal.charm
+cd ..
+
+# 3. Deploy the example terminal charm
 echo "[*] Deploying quantum-terminal charm..."
 juju deploy ./charm/quantum-terminal.charm --config controller-ip="10.0.0.1" || echo "[!] Juju deployment command failed. Ensure your Juju controller is active."
 
