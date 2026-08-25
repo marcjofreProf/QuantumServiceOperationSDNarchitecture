@@ -92,7 +92,7 @@ echo "  -> Restarting LXD daemon..."
 sudo snap restart lxd || true
 sleep 5
 
-# 4. Juju Controller Provisioning
+# 4. Juju Controller & Model Provisioning
 echo "[*] Verifying Juju Controller..."
 CONTROLLERS_OUT=$(juju controllers 2>&1 || true)
 if echo "$CONTROLLERS_OUT" | grep -qi "No controllers registered"; then
@@ -107,6 +107,16 @@ if echo "$CONTROLLERS_OUT" | grep -qi "No controllers registered"; then
     }
 else
     echo "  -> Juju controller is active."
+fi
+
+# Check for and create the target model
+echo "[*] Verifying Juju Model..."
+MODELS_OUT=$(juju models 2>&1 || true)
+if ! echo "$MODELS_OUT" | grep -qw "terminal-model"; then
+    echo "  -> Creating 'terminal-model'..."
+    juju add-model terminal-model || true
+else
+    echo "  -> 'terminal-model' is already active."
 fi
 
 # 5. Directory Structure Verification
