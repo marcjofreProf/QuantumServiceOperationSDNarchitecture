@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package quantum.switch.v1;
 
-service QuantumSwitchService {
+service QuantumGnoiSwitchingService {
   rpc SetCrossConnect (CrossConnectRequest) returns (CrossConnectResponse);
   rpc GetCrossConnectStatus (StatusRequest) returns (StatusResponse);
 }
