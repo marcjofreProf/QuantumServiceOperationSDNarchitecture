@@ -7,7 +7,7 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Quantum Node gNOI Switching Client"
+        description="Quantum Terminal gNOI Switching Client"
     )
     parser.add_argument("node_ip", help="Target IP address of the Quantum Switching Node")
     parser.add_argument(
