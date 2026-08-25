@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-"exec" "$(dirname "$0")/../.venv/bin/python3" "$0" "$@"
+#!/bin/sh
+''''exec "$(dirname "$0")/../.venv/bin/python3" "$0" "$@" # '''
 # --- Python Code Starts Below ---
 
 import sys
