@@ -17,8 +17,8 @@ proto_path = os.path.join(project_root, "src", "api", "proto")
 sys.path.append(proto_path)
 
 try:
-    import terminal_quantum_gnoi_switching_pb2 as pb2
-    import terminal_quantum_gnoi_switching_pb2_grpc as pb2_grpc
+    import quantum_gnoi_switching_pb2 as pb2
+    import quantum_gnoi_switching_pb2_grpc as pb2_grpc
 except ImportError:
     print(f"[-] Error: Could not find compiled stubs in {proto_path}")
     sys.exit(1)
@@ -36,12 +36,13 @@ def main():
     print(f"[*] Command: {command}")
 
     channel = grpc.insecure_channel(target_addr)
-    stub = pb2_grpc.TerminalQuantumGnoiSwitchingServiceStub(channel)
+    # Use the correct Service Stub matching the node
+    stub = pb2_grpc.QuantumSwitchServiceStub(channel)
 
     try:
         if command == "status":
             request = pb2.StatusRequest()
-            response = stub.GetSwitchStatus(request, timeout=5)
+            response = stub.GetCrossConnectStatus(request, timeout=5)
             print(f"[+] Status Response: connected={response.is_connected}, switch_type='{response.switch_type}'")
 
         elif command in ["connect", "enable", "on"]:
