@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package quantum.switch.v1;
+package quantum.gnoi.switching.v1;
 
 service QuantumGnoiSwitchingService {
   rpc SetCrossConnect (CrossConnectRequest) returns (CrossConnectResponse);
