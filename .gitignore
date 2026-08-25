@@ -1,37 +1,87 @@
 # ==========================================
-# QuantumServiceOperationSDNarchitecture
+# QuantumServiceOperationSDNarchitecture .gitignore
 # ==========================================
 
-# Virtual Environments
+# ------------------------------------------
+# Python Environments & Packages
+# ------------------------------------------
 .venv/
 venv/
+env/
 ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Python Cache & Bytecode
+# ------------------------------------------
+# Python Caches & Testing Artifacts
+# ------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
 
-# Generated gRPC / Protobuf Files
-# (We only track the source .proto files)
+# ------------------------------------------
+# Auto-Generated API Schemas (gRPC & YANG)
+# ------------------------------------------
+# Source files in src/api/proto/ and src/api/yang/ remain tracked.
+# Only compiled Python stubs and YANG tree representations are ignored.
 src/api/grpc/*_pb2.py
 src/api/grpc/*_pb2_grpc.py
-
-# Generated YANG Artifacts
+!src/api/grpc/__init__.py
 src/api/yang/*.tree
 
-# Local Configuration Overrides
-# (Track config/terminal.yaml.example, ignore the actual used config)
+# ------------------------------------------
+# Local Configurations & Security Credentials
+# ------------------------------------------
+# Track template files (e.g., config/terminal.yaml.example), ignore active configs
 config/terminal.yaml
+config/*.local.yaml
+*.pem
+*.key
+*.crt
 
-# Canonical Juju / Charmcraft Build Artifacts
-build/
-.tox/
+# ------------------------------------------
+# Logs, Temporary & Runtime Files
+# ------------------------------------------
+*.log
+logs/
+tmp/
+*.sqlite3
+
+# ------------------------------------------
+# Canonical Juju & Charmcraft Build Artifacts
+# ------------------------------------------
+charm/build/
+charm/.charmcraft/
+charm/*.charm
 *.charm
 .charmcraft/
 
-# IDE / OS Files
+# ------------------------------------------
+# IDEs & System Files
+# ------------------------------------------
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 .DS_Store
+Thumbs.db
