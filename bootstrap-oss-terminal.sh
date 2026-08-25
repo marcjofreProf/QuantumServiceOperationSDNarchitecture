@@ -131,6 +131,14 @@ echo "[*] Setting execution permissions on scripts..."
 chmod +x scripts/*.py 2>/dev/null || true
 chmod +x scripts/*.sh 2>/dev/null || true
 
+# 9. Compile grpc stubs
+echo "[*] Compiling gRPC stubs..."
+./.venv/bin/python3 -m grpc_tools.protoc \
+  -I./src/api/proto \
+  --python_out=./src/api/proto \
+  --grpc_python_out=./src/api/proto \
+  ./src/api/proto/terminal_quantum_gnoi_switching.proto
+
 echo "=================================================================="
 echo "[+] Bootstrap complete! System and local environment ready."
 echo "=================================================================="
