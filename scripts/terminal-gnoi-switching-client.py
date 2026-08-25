@@ -21,7 +21,6 @@ try:
     import terminal_quantum_gnoi_switching_pb2_grpc as pb2_grpc
 except ImportError:
     print(f"[-] Error: Could not find compiled stubs in {proto_path}")
-    print("[-] Ensure terminal_quantum_gnoi_switching.proto has been compiled with protoc.")
     sys.exit(1)
 
 
@@ -38,7 +37,8 @@ def main():
     print(f"[*] Command: {command}")
 
     channel = grpc.insecure_channel(target_addr)
-    stub = pb2_grpc.QuantumSwitchServiceStub(channel)
+    # Match working controller stub class
+    stub = pb2_grpc.QuantumGnoiSwitchingServiceStub(channel)
 
     try:
         if command == "status":
