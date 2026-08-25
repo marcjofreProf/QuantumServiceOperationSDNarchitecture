@@ -19,12 +19,13 @@ else
 fi
 
 # 2. Clean generated gRPC / Protobuf stubs
-GRPC_OUT_DIR="src/api/grpc"
-if [ -d "$GRPC_OUT_DIR" ]; then
-    echo "[*] Removing compiled Python gRPC stubs..."
-    find "$GRPC_OUT_DIR" -type f \( -name "*_pb2.py" -o -name "*_pb2_grpc.py" \) -delete
-    echo "  -> Cleaned ${GRPC_OUT_DIR}/"
-fi
+for STUB_DIR in "src/api/proto" "src/api/grpc"; do
+    if [ -d "$STUB_DIR" ]; then
+        echo "[*] Removing compiled Python gRPC stubs in ${STUB_DIR}..."
+        find "$STUB_DIR" -type f \( -name "*_pb2.py" -o -name "*_pb2_grpc.py" \) -delete
+        echo "  -> Cleaned ${STUB_DIR}/"
+    fi
+done
 
 # 3. Clean compiled YANG tree files
 YANG_DIR="src/api/yang"
