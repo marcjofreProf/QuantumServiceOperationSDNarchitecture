@@ -1,1 +1,37 @@
+# ==========================================
+# QuantumServiceOperationSDNarchitecture
+# ==========================================
 
+# Virtual Environments
+.venv/
+venv/
+ENV/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Generated gRPC / Protobuf Files
+# (We only track the source .proto files)
+src/api/grpc/*_pb2.py
+src/api/grpc/*_pb2_grpc.py
+
+# Generated YANG Artifacts
+src/api/yang/*.tree
+
+# Local Configuration Overrides
+# (Track config/terminal.yaml.example, ignore the actual used config)
+config/terminal.yaml
+
+# Canonical Juju / Charmcraft Build Artifacts
+build/
+.tox/
+*.charm
+.charmcraft/
+
+# IDE / OS Files
+.vscode/
+.idea/
+.DS_Store
