@@ -83,6 +83,15 @@ sudo lxc network set lxdbr0 ipv6.address none || true
 sudo lxc network set lxdbr0 ipv4.address auto || true
 sudo lxc network set lxdbr0 ipv4.nat true || true
 
+# Fix WSL2 LXD internet routing (Docker/WSL firewall conflict)
+echo "  -> Applying WSL2 iptables forwarding fix..."
+sudo iptables -P FORWARD ACCEPT || true
+
+# Restart LXD daemon to ensure network changes take effect before bootstrapping
+echo "  -> Restarting LXD daemon..."
+sudo snap restart lxd || true
+sleep 5
+
 # 4. Juju Controller Provisioning
 echo "[*] Verifying Juju Controller..."
 CONTROLLERS_OUT=$(juju controllers 2>&1 || true)
