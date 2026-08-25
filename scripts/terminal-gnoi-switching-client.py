@@ -12,16 +12,15 @@ if os.path.exists(venv_python) and sys.executable != venv_python:
 
 import grpc
 
-# Add the specific proto directory from your image to PYTHONPATH
+# Add proto directory to path
 proto_path = os.path.join(project_root, "src", "api", "proto")
 sys.path.append(proto_path)
 
 try:
-    import quantum_gnoi_switching_pb2 as pb2
-    import quantum_gnoi_switching_pb2_grpc as pb2_grpc
+    import terminal_quantum_gnoi_switching_pb2 as pb2
+    import terminal_quantum_gnoi_switching_pb2_grpc as pb2_grpc
 except ImportError:
     print(f"[-] Error: Could not find compiled stubs in {proto_path}")
-    print("[-] Please ensure quantum_gnoi_switching.proto is compiled on the terminal side.")
     sys.exit(1)
 
 def main():
@@ -35,32 +34,25 @@ def main():
 
     print(f"[*] Target Node Address: {target_addr}")
     print(f"[*] Command: {command}")
-    print(f"[*] Python Interpreter: {sys.executable}")
 
     channel = grpc.insecure_channel(target_addr)
-    stub = pb2_grpc.QuantumGnoiSwitchingServiceStub(channel)
+    stub = pb2_grpc.TerminalQuantumGnoiSwitchingServiceStub(channel)
 
     try:
         if command == "status":
             request = pb2.StatusRequest()
-            print(f"[+] Sending Protobuf Request: StatusRequest()")
-            response = stub.GetCrossConnectStatus(request, timeout=5)
+            response = stub.GetSwitchStatus(request, timeout=5)
             print(f"[+] Status Response: connected={response.is_connected}, switch_type='{response.switch_type}'")
 
         elif command in ["connect", "enable", "on"]:
             request = pb2.CrossConnectRequest(state=True)
-            print(f"[+] Sending Protobuf Request: CrossConnectRequest(state=True)")
             response = stub.SetCrossConnect(request, timeout=5)
             print(f"[+] Response: success={response.success}, message='{response.message}'")
 
         elif command in ["disconnect", "disable", "off"]:
             request = pb2.CrossConnectRequest(state=False)
-            print(f"[+] Sending Protobuf Request: CrossConnectRequest(state=False)")
             response = stub.SetCrossConnect(request, timeout=5)
             print(f"[+] Response: success={response.success}, message='{response.message}'")
-
-        else:
-            print(f"[-] Unknown command '{command}'. Use 'status', 'connect', or 'disconnect'.")
 
     except grpc.RpcError as e:
         print(f"[-] gRPC Error ({e.code()}): {e.details()}")
