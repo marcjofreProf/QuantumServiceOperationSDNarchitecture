@@ -8,11 +8,12 @@ echo "=================================================================="
 echo "  Bootstrapping QuantumServiceOperationSDNarchitecture Environment"
 echo "=================================================================="
 
-# 1. System Dependency Checks & Fixes (python3-venv, pip)
+# 1. System Dependency Checks & Fixes (ensurepip, pip3)
 echo "[*] Verifying system dependencies..."
 SYSTEM_DEPS=()
 
-if ! python3 -m venv --help &>/dev/null; then
+# Check for ensurepip instead of venv --help (prevents Ubuntu false positives)
+if ! python3 -c "import ensurepip" &>/dev/null; then
     SYSTEM_DEPS+=("python3-venv")
 fi
 
@@ -32,7 +33,6 @@ echo "[*] Verifying Canonical Juju tooling..."
 if ! command -v juju &>/dev/null; then
     echo "[!] Juju CLI not found. Installing via snap..."
     if command -v snap &>/dev/null; then
-        # Fixed: Changed from 3.x/stable to 3/stable
         sudo snap install juju --classic --channel=3/stable
     else
         echo "[!] Snap package manager not found. Please install Juju manually."
@@ -56,6 +56,12 @@ mkdir -p src/api/proto src/api/yang src/api/grpc src/api/restconf charm scripts 
 
 # 4. Virtual Environment Provisioning
 VENV_DIR=".venv"
+# Recreate .venv if pip is missing (cleans broken previous attempts)
+if [ -d "$VENV_DIR" ] && [ ! -f "${VENV_DIR}/bin/pip" ]; then
+    echo "[!] Incomplete virtual environment detected. Cleaning up..."
+    rm -rf "$VENV_DIR"
+fi
+
 if [ ! -d "$VENV_DIR" ]; then
     echo "[*] Creating isolated Python environment in ${VENV_DIR}..."
     python3 -m venv "$VENV_DIR"
@@ -63,7 +69,7 @@ else
     echo "[*] Existing environment found in ${VENV_DIR}."
 fi
 
-VENV_PYTHON="${VENV_DIR}/bin/python"
+VENV_PYTHON="${VENV_DIR}/bin/python3"
 VENV_PIP="${VENV_DIR}/bin/pip"
 VENV_PYANG="${VENV_DIR}/bin/pyang"
 
