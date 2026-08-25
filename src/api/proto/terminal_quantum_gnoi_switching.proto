@@ -30,9 +30,7 @@ enum QuantumResourceType {
   RESOURCE_TYPE_RAW_QUBIT = 2;
 }
 
-message SwitchStatusRequest {
-  string terminal_id = 1;
-}
+message SwitchStatusRequest {}
 
 message SwitchStatusResponse {
   string node_id = 1;
