@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 import sys
 import os
+
+# Auto-reexec script under project .venv if present and not currently active
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+venv_python = os.path.join(project_root, ".venv", "bin", "python3")
+
+if os.path.exists(venv_python) and sys.executable != venv_python:
+    os.execv(venv_python, [venv_python] + sys.argv)
+
 import grpc
 
-# Add proto directory to path if needed
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add project root to PYTHONPATH for stub discovery
+sys.path.append(project_root)
 
 try:
     import proto.quantum_gnoi_switching_pb2 as pb2
@@ -24,13 +33,13 @@ def main():
 
     print(f"[*] Target Node Address: {target_addr}")
     print(f"[*] Command: {command}")
+    print(f"[*] Python Interpreter: {sys.executable}")
 
     channel = grpc.insecure_channel(target_addr)
     stub = pb2_grpc.QuantumGnoiSwitchingServiceStub(channel)
 
     try:
         if command == "status":
-            # Empty StatusRequest matching node schema
             request = pb2.StatusRequest()
             print(f"[+] Sending Protobuf Request: StatusRequest()")
             response = stub.GetCrossConnectStatus(request, timeout=5)
