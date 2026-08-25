@@ -8,6 +8,13 @@ echo "=================================================================="
 echo "  Bootstrapping QuantumServiceOperationSDNarchitecture Environment"
 echo "=================================================================="
 
+# 0. Fix WSL Runtime Directory Permissions
+if [ -z "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
+    export XDG_RUNTIME_DIR="/tmp/run-user-$(id -u)"
+    mkdir -p "$XDG_RUNTIME_DIR"
+    chmod 700 "$XDG_RUNTIME_DIR"
+fi
+
 # 1. System Dependency Checks & Fixes (ensurepip, pip3)
 echo "[*] Verifying system dependencies..."
 SYSTEM_DEPS=()
@@ -49,32 +56,42 @@ else
     echo "  -> Charmcraft is installed: $(charmcraft --version | awk '{print $1}')"
 fi
 
-# 3. Juju Controller & Local Cloud Provisioning (LXD)
+# 3. LXD Group Check & Session Elevation
+echo "[*] Verifying LXD environment & permissions..."
+if ! command -v lxd &>/dev/null; then
+    echo "  -> LXD is missing. Installing via snap..."
+    sudo snap install lxd
+fi
+
+# Ensure user belongs to the lxd group and group is active in current session
+if ! id -nG "$USER" | grep -qw "lxd"; then
+    echo "  -> Adding $USER to the lxd group..."
+    sudo usermod -aG lxd "$USER"
+fi
+
+if [ "$(id -gn)" != "lxd" ] && ! id -nG | grep -qw "lxd"; then
+    echo "  -> Elevating LXD group session and restarting bootstrap process..."
+    exec sg lxd -c "$0 $*"
+fi
+
+# Initialize LXD if not already initialized
+sudo lxd init --auto || true
+
+# Auto-fix IPv6 routing issues on WSL / restricted networks
+echo "  -> Optimizing LXD bridge network (lxdbr0) for IPv4..."
+sudo lxc network set lxdbr0 ipv6.address none || true
+sudo lxc network set lxdbr0 ipv4.address auto || true
+sudo lxc network set lxdbr0 ipv4.nat true || true
+
+# 4. Juju Controller Provisioning
 echo "[*] Verifying Juju Controller..."
 CONTROLLERS_OUT=$(juju controllers 2>&1 || true)
 if echo "$CONTROLLERS_OUT" | grep -qi "No controllers registered"; then
-    echo "[!] No Juju controller registered. Setting up local LXD cloud..."
+    echo "[!] No Juju controller registered. Bootstrapping local controller..."
     
-    # Check if LXD is missing OR if the background socket is broken (WSL edge case)
-    if ! command -v lxd &>/dev/null || ! sudo lxc list &>/dev/null; then
-        echo "  -> LXD is missing or corrupted. Performing clean installation..."
-        sudo snap remove --purge lxd || true
-        sudo snap install lxd
-    fi
+    # Clean up any partial failed bootstrap state
+    juju destroy-controller terminal-controller --destroy-all-models --yes 2>/dev/null || true
     
-    # Initialize LXD
-    echo "  -> Initializing local LXD cloud..."
-    sudo lxd init --auto || true
-    
-    # Check for LXD group membership; if missing, add user and re-exec seamlessly
-    if ! id -nG "$USER" | grep -qw "lxd"; then
-        echo "  -> Adding $USER to the lxd group..."
-        sudo usermod -aG lxd "$USER"
-        echo "  -> Elevating group permissions and restarting bootstrap process..."
-        exec sg lxd "$0 $*"
-    fi
-    
-    echo "  -> Bootstrapping local Juju controller (terminal-controller)..."
     juju bootstrap localhost terminal-controller || {
         echo "[!] Failed to bootstrap Juju controller."
         exit 1
@@ -83,11 +100,11 @@ else
     echo "  -> Juju controller is active."
 fi
 
-# 4. Directory Structure Verification
+# 5. Directory Structure Verification
 echo "[*] Verifying project structure..."
 mkdir -p src/api/proto src/api/yang src/api/grpc src/api/restconf charm scripts config tests
 
-# 5. Virtual Environment Provisioning
+# 6. Virtual Environment Provisioning
 VENV_DIR=".venv"
 if [ -d "$VENV_DIR" ] && [ ! -f "${VENV_DIR}/bin/pip" ]; then
     echo "[!] Incomplete virtual environment detected. Cleaning up..."
@@ -105,7 +122,7 @@ VENV_PYTHON="${VENV_DIR}/bin/python3"
 VENV_PIP="${VENV_DIR}/bin/pip"
 VENV_PYANG="${VENV_DIR}/bin/pyang"
 
-# 6. Dependency Installation
+# 7. Dependency Installation
 echo "[*] Upgrading pip and installing dependencies..."
 "$VENV_PIP" install --upgrade pip setuptools wheel
 
@@ -124,7 +141,7 @@ else
         pyyaml
 fi
 
-# 7. Compile Protobuf Schemas
+# 8. Compile Protobuf Schemas
 PROTO_DIR="src/api/proto"
 GRPC_OUT_DIR="src/api/grpc"
 
@@ -144,7 +161,7 @@ else
     echo "[!] No .proto files found in ${PROTO_DIR}/. Skipping gRPC compilation."
 fi
 
-# 8. Validate YANG Schemas
+# 9. Validate YANG Schemas
 YANG_DIR="src/api/yang"
 
 echo "[*] Validating YANG models..."
@@ -158,13 +175,12 @@ else
     echo "[!] No .yang files found in ${YANG_DIR}/. Skipping YANG validation."
 fi
 
-# 9. Apply Execution Permissions
+# 10. Apply Execution Permissions & Stubs
 echo "[*] Setting execution permissions on scripts..."
 chmod +x scripts/*.py 2>/dev/null || true
 chmod +x scripts/*.sh 2>/dev/null || true
 chmod +x tests/*.sh 2>/dev/null || true
 
-# 10. Compile gRPC Stubs
 echo "[*] Compiling gRPC stubs..."
 ./.venv/bin/python3 -m grpc_tools.protoc \
   -I./src/api/proto \
