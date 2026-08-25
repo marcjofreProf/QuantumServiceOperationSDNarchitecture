@@ -2,7 +2,7 @@
 import sys
 import os
 
-# Auto-reexec script under project .venv if present and not currently active
+# Auto-reexec script under project .venv if present
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 venv_python = os.path.join(project_root, ".venv", "bin", "python3")
@@ -12,15 +12,17 @@ if os.path.exists(venv_python) and sys.executable != venv_python:
 
 import grpc
 
-# Add project root to PYTHONPATH for stub discovery
-sys.path.append(project_root)
+# Add the specific proto directory from your image to PYTHONPATH
+proto_path = os.path.join(project_root, "src", "api", "proto")
+sys.path.append(proto_path)
 
 try:
-    import proto.quantum_gnoi_switching_pb2 as pb2
-    import proto.quantum_gnoi_switching_pb2_grpc as pb2_grpc
-except ImportError:
     import quantum_gnoi_switching_pb2 as pb2
     import quantum_gnoi_switching_pb2_grpc as pb2_grpc
+except ImportError:
+    print(f"[-] Error: Could not find compiled stubs in {proto_path}")
+    print("[-] Please ensure quantum_gnoi_switching.proto is compiled on the terminal side.")
+    sys.exit(1)
 
 def main():
     if len(sys.argv) < 3:
