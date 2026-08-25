@@ -3,7 +3,7 @@
 # ==========================================
 
 # ------------------------------------------
-# Python Environments & Packages
+# Python Environments & Virtual Envs
 # ------------------------------------------
 .venv/
 venv/
@@ -41,17 +41,24 @@ htmlcov/
 # ------------------------------------------
 # Auto-Generated API Schemas (gRPC & YANG)
 # ------------------------------------------
-# Source files in src/api/proto/ and src/api/yang/ remain tracked.
-# Only compiled Python stubs and YANG tree representations are ignored.
+# Track source .proto and .yang files, ignore generated stubs and trees
 src/api/grpc/*_pb2.py
 src/api/grpc/*_pb2_grpc.py
 !src/api/grpc/__init__.py
 src/api/yang/*.tree
 
 # ------------------------------------------
+# Canonical Juju & Charmcraft Build Artifacts
+# ------------------------------------------
+.charmcraft/
+charm/.charmcraft/
+charm/build/
+*.charm
+
+# ------------------------------------------
 # Local Configurations & Security Credentials
 # ------------------------------------------
-# Track template files (e.g., config/terminal.yaml.example), ignore active configs
+# Track template config files (e.g., config/terminal.yaml.example)
 config/terminal.yaml
 config/*.local.yaml
 *.pem
@@ -67,16 +74,7 @@ tmp/
 *.sqlite3
 
 # ------------------------------------------
-# Canonical Juju & Charmcraft Build Artifacts
-# ------------------------------------------
-charm/build/
-charm/.charmcraft/
-charm/*.charm
-*.charm
-.charmcraft/
-
-# ------------------------------------------
-# IDEs & System Files
+# IDEs & OS Files
 # ------------------------------------------
 .vscode/
 .idea/
