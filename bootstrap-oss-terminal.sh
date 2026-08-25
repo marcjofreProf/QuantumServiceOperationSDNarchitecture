@@ -37,7 +37,7 @@ if ! command -v juju &>/dev/null; then
         echo "[!] Snap package manager not found. Please install Juju manually."
     fi
 else
-    echo "  -> Juju CLI is installed: $(juju --version)"
+    echo "  -> Juju CLI is installed: $(juju --version | awk '{print $1}')"
 fi
 
 if ! command -v charmcraft &>/dev/null; then
@@ -46,12 +46,12 @@ if ! command -v charmcraft &>/dev/null; then
         sudo snap install charmcraft --classic
     fi
 else
-    echo "  -> Charmcraft is installed: $(charmcraft --version)"
+    echo "  -> Charmcraft is installed: $(charmcraft --version | awk '{print $1}')"
 fi
 
 # 3. Juju Controller & Local Cloud Provisioning (LXD)
 echo "[*] Verifying Juju Controller..."
-if ! juju controllers --format=yaml 2>/dev/null | grep -q 'controllers:'; then
+if juju controllers 2>&1 | grep -qi "No controllers registered"; then
     echo "[!] No Juju controller registered. Setting up local LXD cloud..."
     
     # Check if LXD is missing OR if the background socket is broken (WSL edge case)
