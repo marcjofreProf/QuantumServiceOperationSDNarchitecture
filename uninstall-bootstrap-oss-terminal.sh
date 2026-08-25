@@ -44,10 +44,11 @@ echo "[*] Removing Python cache directories and bytecode..."
 find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 find . -type f -name "*.py[cod]" -delete 2>/dev/null || true
 
-# 6. Revoke Execution Permissions from scripts
-echo "[*] Removing execution permissions from scripts..."
+# 6. Revoke Execution Permissions from scripts and tests
+echo "[*] Removing execution permissions from scripts and tests..."
 chmod -x scripts/*.py 2>/dev/null || true
 chmod -x scripts/*.sh 2>/dev/null || true
+chmod -x tests/*.sh 2>/dev/null || true
 
 echo "=================================================================="
 echo "[+] Uninstall complete! Local workspace returned to clean state."
