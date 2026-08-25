@@ -47,6 +47,7 @@ Clone the repository and run the bootstrap script to create your virtual environ
 
 git clone git clone https://github.com/marcjofreProf/QuantumServiceOperationSDNarchitecture.git
 cd QuantumServiceOperationSDNarchitecture
+sudo chmod +x ./bootstrap-oss-terminal.sh
 ./bootstrap-oss-terminal.sh
 
 
