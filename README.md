@@ -19,7 +19,7 @@ QuantumServiceOperationSDNarchitecture/
 │   │   ├── yang/        # YANG models for RESTCONF
 │   │   ├── proto/       # Protobuf files for gRPC/gNMI
 │   │   ├── restconf/    # RESTCONF client & server implementations
-│   │   └── grpc/        # Generated gRPC code & client stubs
+│   └── grpc/            # Generated gRPC code & client stubs
 │   ├── core/            # Quantum resource lifecycle and connection management
 │   └── hardware/        # Hardware abstraction layer (memories, transceivers)
 ├── tests/               # Unit tests
