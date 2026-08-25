@@ -1,0 +1,17 @@
+# Core gRPC & Protobuf
+grpcio==1.83.0
+grpcio-tools==1.83.0
+protobuf==7.36.0
+
+# Network & Model Tooling
+pyang==2.7.1
+gnoi-client==0.0.0a0
+onos-api==0.7.45
+
+# Canonical Charm Operator Framework
+ops==3.8.1
+
+# REST APIs & Server Framework
+fastapi==0.141.1
+uvicorn==0.52.4
+pyyaml==6.0.3
