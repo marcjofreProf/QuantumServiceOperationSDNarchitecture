@@ -54,9 +54,10 @@ echo "[*] Verifying Juju Controller..."
 if ! juju controllers --format=yaml 2>/dev/null | grep -q 'controllers:'; then
     echo "[!] No Juju controller registered. Setting up local LXD cloud..."
     
-    # Install LXD if missing
-    if ! command -v lxd &>/dev/null; then
-        echo "  -> Installing LXD via snap..."
+    # Check if LXD is missing OR if the background socket is broken (WSL edge case)
+    if ! command -v lxd &>/dev/null || ! sudo lxc list &>/dev/null; then
+        echo "  -> LXD is missing or corrupted. Performing clean installation..."
+        sudo snap remove --purge lxd || true
         sudo snap install lxd
     fi
     
