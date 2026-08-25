@@ -2,66 +2,23 @@ syntax = "proto3";
 
 package quantum.terminal.gnoi.v1;
 
-// Service definition for terminal-initiated gNOI operations on switching nodes
 service TerminalQuantumGnoiSwitchingService {
-  // Query operational status and hardware capability of the target optical switch
-  rpc GetSwitchStatus (SwitchStatusRequest) returns (SwitchStatusResponse);
-
-  // Request/configure optical matrix cross-connects for quantum channels
   rpc SetCrossConnect (CrossConnectRequest) returns (CrossConnectResponse);
-
-  // Stream real-time quantum channel metrics (fidelity, QBER, clock sync drift)
-  rpc StreamFidelityTelemetry (TelemetryRequest) returns (stream TelemetryReport);
-}
-
-// Operational state of the quantum switch node
-enum SwitchState {
-  SWITCH_STATE_UNSPECIFIED = 0;
-  SWITCH_STATE_READY = 1;
-  SWITCH_STATE_BUSY = 2;
-  SWITCH_STATE_ERROR = 3;
-  SWITCH_STATE_MAINTENANCE = 4;
-}
-
-// Quantum resource target types
-enum QuantumResourceType {
-  RESOURCE_TYPE_UNSPECIFIED = 0;
-  RESOURCE_TYPE_EPR_PAIR = 1;
-  RESOURCE_TYPE_RAW_QUBIT = 2;
-}
-
-message SwitchStatusRequest {}
-
-message SwitchStatusResponse {
-  string node_id = 1;
-  SwitchState state = 2;
-  string vendor_info = 3;
-  uint32 active_cross_connects = 4;
+  rpc GetSwitchStatus (StatusRequest) returns (StatusResponse);
 }
 
 message CrossConnectRequest {
-  string session_id = 1;
-  uint32 input_port = 2;
-  uint32 output_port = 3;
-  bool connect_state = 4; // true = CONNECT, false = DISCONNECT
-  QuantumResourceType resource_type = 5;
+  bool state = 1;
 }
 
 message CrossConnectResponse {
-  string session_id = 1;
-  bool success = 2;
-  string message = 3;
-  uint64 timestamp_epoch_ms = 4;
+  bool success = 1;
+  string message = 2;
 }
 
-message TelemetryRequest {
-  string session_id = 1;
-  uint32 sample_interval_ms = 2;
-}
+message StatusRequest {}
 
-message TelemetryReport {
-  string session_id = 1;
-  double measured_fidelity = 2;
-  double qber = 3;
-  uint64 timestamp_epoch_ms = 4;
+message StatusResponse {
+  bool is_connected = 1;
+  string switch_type = 2;
 }
