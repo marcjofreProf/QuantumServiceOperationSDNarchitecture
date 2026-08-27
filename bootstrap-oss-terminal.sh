@@ -26,9 +26,13 @@ fi
 
 # 1. System Dependency Checks, Time Sync & Fixes
 echo "[*] Synchronizing system time (OS clock drift fix)..."
-sudo apt-get update -y
-sudo apt-get install util-linux -y
-sudo hwclock -s || true
+if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+    sudo systemctl restart systemd-timesyncd || true
+else
+    sudo apt-get update -yqq
+    sudo apt-get install -yqq ntpdate
+    sudo ntpdate pool.ntp.org 2>/dev/null || true
+fi
 
 echo "[*] Verifying system dependencies..."
 SYSTEM_DEPS=()
