@@ -12,5 +12,23 @@ description: |
   A Juju charm for operating the Quantum Service SDN architecture terminal.
 
 actions:
-  # This points to the actions.yaml you already have in the folder
-  actions.yaml
+  create-cross-connect:
+  description: "Triggers a RESTCONF request using example-quantum-switching-terminal-service.yang."
+  params:
+    service-id:
+      type: string
+      description: "Service Identifier"
+      default: "example-qservice-01"
+    target-node-ip:
+      type: string
+      description: "IP address of the switch node"
+      default: "10.0.0.254"
+    ingress-port:
+      type: integer
+      default: 1
+    egress-port:
+      type: integer
+      default: 2
+    admin-state:
+      type: string
+      default: "ENABLED"
