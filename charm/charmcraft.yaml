@@ -6,10 +6,9 @@ description: |
   terminal node. It integrates with the gNOI switching client to execute 
   terminal-level operations and handle YANG model configurations.
 
+base: ubuntu@24.04
 platforms:
-  ubuntu@24.04:
-    build-on: [amd64]
-    build-for: [amd64]
+  amd64:
 
 config:
   options:
