@@ -118,37 +118,47 @@ fi
 # 4. Juju Controller & Model Provisioning
 echo "[*] Verifying Juju Controller..."
 
-# Non-blocking wait loop using timeout to prevent hanging on socket connections
-echo "  -> Waiting for Juju controller API to respond..."
-API_READY=false
-for i in {1..8}; do
-    if timeout 4s juju controllers &>/dev/null; then
-        API_READY=true
-        break
-    fi
-    echo "     [API offline or LXD container initializing, retrying in 3s...] ($i/8)"
-    sleep 3
-done
+CONTROLLER_NAME="terminal-controller"
 
-if ! timeout 5s juju show-controller terminal-controller &>/dev/null; then
-    echo "[!] 'terminal-controller' active connection not established. Bootstrapping local controller..."
+if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
+    echo "  -> Found local registration for '$CONTROLLER_NAME'. Testing API connection..."
+    CONTROLLER_REACHABLE=false
     
-    juju destroy-controller terminal-controller --destroy-all-models --yes 2>/dev/null || true
-    
-    juju bootstrap localhost terminal-controller || {
+    for i in {1..10}; do
+        if timeout 5s juju switch "$CONTROLLER_NAME" &>/dev/null; then
+            CONTROLLER_REACHABLE=true
+            echo "  -> Juju controller '$CONTROLLER_NAME' is active and reachable."
+            break
+        fi
+        echo "     [Waiting for controller API to respond... ($i/10)]"
+        sleep 3
+    done
+
+    if [ "$CONTROLLER_REACHABLE" = false ]; then
+        echo "[!] '$CONTROLLER_NAME' API unreachable. Force purging stale controller registration..."
+        juju kill-controller "$CONTROLLER_NAME" --yes 2>/dev/null || true
+        juju unregister "$CONTROLLER_NAME" 2>/dev/null || true
+        
+        echo "[!] Re-bootstrapping local controller..."
+        juju bootstrap localhost "$CONTROLLER_NAME" || {
+            echo "[!] Failed to bootstrap Juju controller."
+            exit 1
+        }
+    fi
+else
+    echo "[!] '$CONTROLLER_NAME' not registered. Bootstrapping local controller..."
+    juju bootstrap localhost "$CONTROLLER_NAME" || {
         echo "[!] Failed to bootstrap Juju controller."
         exit 1
     }
-else
-    echo "  -> Juju controller 'terminal-controller' is active."
 fi
 
 # Check for and switch to the target model
 echo "[*] Verifying Juju Model..."
-if ! timeout 5s juju switch terminal-controller:terminal-model &>/dev/null; then
+if ! timeout 5s juju switch "${CONTROLLER_NAME}:terminal-model" &>/dev/null; then
     echo "  -> Creating 'terminal-model'..."
-    juju add-model terminal-model terminal-controller || {
-        echo "[!] Failed to create model. Controller API might still be unreachable."
+    juju add-model terminal-model "$CONTROLLER_NAME" || {
+        echo "[!] Failed to create model."
         exit 1
     }
 else
