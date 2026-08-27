@@ -151,20 +151,27 @@ if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
     echo "  -> Found local registration for '$CONTROLLER_NAME'. Testing API connection..."
     CONTROLLER_REACHABLE=false
     
-    for i in {1..10}; do
+    for i in {1..5}; do
         if timeout 5s juju switch "$CONTROLLER_NAME" &>/dev/null; then
             CONTROLLER_REACHABLE=true
             echo "  -> Juju controller '$CONTROLLER_NAME' is active and reachable."
             break
         fi
-        echo "     [Waiting for controller API to respond... ($i/10)]"
-        sleep 3
+        echo "     [Waiting for controller API to respond... ($i/5)]"
+        sleep 2
     done
 
     if [ "$CONTROLLER_REACHABLE" = false ]; then
-        echo "[!] '$CONTROLLER_NAME' API unreachable. Force purging stale controller registration..."
-        juju kill-controller "$CONTROLLER_NAME" --yes 2>/dev/null || true
+        echo "[!] '$CONTROLLER_NAME' API unreachable. Force purging stale controller and LXD trust certificates..."
+        juju kill-controller "$CONTROLLER_NAME" --yes --force 2>/dev/null || true
         juju unregister "$CONTROLLER_NAME" 2>/dev/null || true
+        
+        # Scrub ghost certificates from LXD trust store
+        sudo lxc config trust rm juju 2>/dev/null || true
+        lxc config trust rm juju 2>/dev/null || true
+        
+        # Clear local credential cache collision
+        rm -rf ~/.local/share/juju
         
         echo "[!] Re-bootstrapping local controller..."
         juju bootstrap localhost "$CONTROLLER_NAME" || {
@@ -173,7 +180,11 @@ if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
         }
     fi
 else
-    echo "[!] '$CONTROLLER_NAME' not registered. Bootstrapping local controller..."
+    echo "[!] '$CONTROLLER_NAME' not registered. Ensuring clean trust state before bootstrap..."
+    # Prevent duplicate identity collisions on clean client setups
+    sudo lxc config trust rm juju 2>/dev/null || true
+    lxc config trust rm juju 2>/dev/null || true
+    
     juju bootstrap localhost "$CONTROLLER_NAME" || {
         echo "[!] Failed to bootstrap Juju controller."
         exit 1
