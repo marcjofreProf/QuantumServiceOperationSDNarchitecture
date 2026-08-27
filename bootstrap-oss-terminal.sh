@@ -25,7 +25,7 @@ if [ ! -S "$XDG_RUNTIME_DIR/bus" ]; then
 fi
 
 # 1. System Dependency Checks, Time Sync & Fixes
-echo "[*] Synchronizing system time (WSL clock drift fix)..."
+echo "[*] Synchronizing system time (OS clock drift fix)..."
 sudo apt-get update -y
 sudo apt-get install util-linux -y
 sudo hwclock -s || true
