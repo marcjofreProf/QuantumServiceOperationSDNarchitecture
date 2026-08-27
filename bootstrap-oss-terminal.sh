@@ -112,8 +112,18 @@ sudo netfilter-persistent save >/dev/null 2>&1 || true
 if [ "$LXD_RESTART_NEEDED" = true ]; then
     echo "  -> Network changes applied. Restarting LXD daemon..."
     sudo snap restart lxd || true
-    sleep 3
 fi
+
+# Active wait loop for LXD API to prevent Charmcraft/Juju timeouts
+echo "  -> Waiting for LXD API to become fully responsive..."
+for i in {1..15}; do
+    if timeout 3s lxc info &>/dev/null; then
+        echo "  -> LXD daemon is ready."
+        break
+    fi
+    echo "     [LXD API unresponsive, retrying in 2s...] ($i/15)"
+    sleep 2
+done
 
 # 4. Juju Controller & Model Provisioning
 echo "[*] Verifying Juju Controller..."
