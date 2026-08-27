@@ -24,7 +24,12 @@ if [ ! -S "$XDG_RUNTIME_DIR/bus" ]; then
     dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork 2>/dev/null || true
 fi
 
-# 1. System Dependency Checks & Fixes (ensurepip, pip3)
+# 1. System Dependency Checks, Time Sync & Fixes
+echo "[*] Synchronizing system time (WSL clock drift fix)..."
+sudo apt-get update -y
+sudo apt-get install util-linux -y
+sudo hwclock -s || true
+
 echo "[*] Verifying system dependencies..."
 SYSTEM_DEPS=()
 
