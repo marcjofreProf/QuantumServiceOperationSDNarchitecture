@@ -9,7 +9,6 @@ echo "  Bootstrapping QuantumServiceOperationSDNarchitecture Environment"
 echo "=================================================================="
 
 # 0. Fix WSL Runtime Directory Permissions & DBus
-# Snap strictly looks for /run/user/UID/bus. We must ensure this exact path exists.
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 if [ ! -d "$XDG_RUNTIME_DIR" ]; then
     sudo mkdir -p "$XDG_RUNTIME_DIR"
@@ -73,7 +72,6 @@ if ! command -v lxd &>/dev/null; then
     sudo snap install lxd
 fi
 
-# Ensure user belongs to the lxd group and group is active in current session
 if ! id -nG "$USER" | grep -qw "lxd"; then
     echo "  -> Adding $USER to the lxd group..."
     sudo usermod -aG lxd "$USER"
@@ -84,12 +82,18 @@ if [ "$(id -gn)" != "lxd" ] && ! id -nG | grep -qw "lxd"; then
     exec sg lxd -c "$0 $*"
 fi
 
-# Initialize LXD if not already initialized
 sudo lxd init --auto || true
 
-# Auto-fix IPv6 routing issues on WSL / restricted networks
-echo "  -> Optimizing LXD bridge network (lxdbr0) for IPv4..."
-sudo lxc network set lxdbr0 ipv6.address none || true
+# Auto-fix IPv6 routing issues conditionally to avoid unnecessary daemon restarts
+echo "  -> Checking LXD bridge network (lxdbr0) configuration..."
+LXD_RESTART_NEEDED=false
+
+if [ "$(sudo lxc network get lxdbr0 ipv6.address 2>/dev/null)" != "none" ]; then
+    echo "  -> Disabling IPv6 on lxdbr0..."
+    sudo lxc network set lxdbr0 ipv6.address none || true
+    LXD_RESTART_NEEDED=true
+fi
+
 sudo lxc network set lxdbr0 ipv4.address auto || true
 sudo lxc network set lxdbr0 ipv4.nat true || true
 
@@ -105,28 +109,30 @@ if ! dpkg -l | grep -qw iptables-persistent; then
 fi
 sudo netfilter-persistent save >/dev/null 2>&1 || true
 
-# Restart LXD daemon to ensure network changes take effect before bootstrapping
-echo "  -> Restarting LXD daemon..."
-sudo snap restart lxd || true
+if [ "$LXD_RESTART_NEEDED" = true ]; then
+    echo "  -> Network changes applied. Restarting LXD daemon..."
+    sudo snap restart lxd || true
+    sleep 3
+fi
 
 # 4. Juju Controller & Model Provisioning
 echo "[*] Verifying Juju Controller..."
 
-# Active wait loop: LXD containers can take up to 30s to expose the Juju API after a daemon restart
-echo "  -> Waiting for Juju controller API to become responsive..."
-for i in {1..6}; do
-    if juju controllers &>/dev/null; then
+# Non-blocking wait loop using timeout to prevent hanging on socket connections
+echo "  -> Waiting for Juju controller API to respond..."
+API_READY=false
+for i in {1..8}; do
+    if timeout 4s juju controllers &>/dev/null; then
+        API_READY=true
         break
     fi
-    echo "     [API offline or booting, retrying in 10s...] ($i/6)"
-    sleep 10
+    echo "     [API offline or LXD container initializing, retrying in 3s...] ($i/8)"
+    sleep 3
 done
 
-# Check if the specific controller exists instead of relying on grep
-if ! juju show-controller terminal-controller &>/dev/null; then
-    echo "[!] 'terminal-controller' not found. Bootstrapping local controller..."
+if ! timeout 5s juju show-controller terminal-controller &>/dev/null; then
+    echo "[!] 'terminal-controller' active connection not established. Bootstrapping local controller..."
     
-    # Clean up any partial failed bootstrap state
     juju destroy-controller terminal-controller --destroy-all-models --yes 2>/dev/null || true
     
     juju bootstrap localhost terminal-controller || {
@@ -139,8 +145,7 @@ fi
 
 # Check for and switch to the target model
 echo "[*] Verifying Juju Model..."
-# Attempting to switch serves as both a verification check and sets the active context
-if ! juju switch terminal-controller:terminal-model &>/dev/null; then
+if ! timeout 5s juju switch terminal-controller:terminal-model &>/dev/null; then
     echo "  -> Creating 'terminal-model'..."
     juju add-model terminal-model terminal-controller || {
         echo "[!] Failed to create model. Controller API might still be unreachable."
