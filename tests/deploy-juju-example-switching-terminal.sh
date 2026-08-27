@@ -21,7 +21,7 @@ fi
 # 2. Build the charm (NEW STEP)
 echo "[*] Packing the charm with Charmcraft..."
 cd charm/
-charmcraft pack
+charmcraft pack --destructive-mode
 # Rename the dynamically generated file to exactly what the script expects
 mv *.charm quantum-terminal.charm
 cd ..
