@@ -74,7 +74,7 @@ else
     echo "  -> Charmcraft is installed: $(charmcraft --version | awk '{print $1}')"
 fi
 
-# 3. LXD Group Check & Session Elevation
+# 3. LXD Group Check & Persistent Session Elevation
 echo "[*] Verifying LXD environment & permissions..."
 if ! command -v lxd &>/dev/null; then
     echo "  -> LXD is missing. Installing via snap..."
@@ -84,6 +84,13 @@ fi
 if ! id -nG "$USER" | grep -qw "lxd"; then
     echo "  -> Adding $USER to the lxd group..."
     sudo usermod -aG lxd "$USER"
+fi
+
+# Make LXD group membership persistent for future WSL shell sessions
+if ! grep -q "sg lxd -c" ~/.bashrc; then
+    echo "  -> Injecting LXD group auto-elevation into ~/.bashrc..."
+    echo -e "\n# Auto-elevate LXD group for Juju/Charmcraft in WSL" >> ~/.bashrc
+    echo "if ! id -nG | grep -qw 'lxd' && grep -q '^lxd:.*:$USER' /etc/group; then exec sg lxd -c \"\$SHELL\"; fi" >> ~/.bashrc
 fi
 
 if [ "$(id -gn)" != "lxd" ] && ! id -nG | grep -qw "lxd"; then
