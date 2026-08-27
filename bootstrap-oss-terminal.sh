@@ -9,9 +9,11 @@ echo "  Bootstrapping QuantumServiceOperationSDNarchitecture Environment"
 echo "=================================================================="
 
 # 0. Fix WSL Runtime Directory Permissions & DBus
-if [ -z "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
-    export XDG_RUNTIME_DIR="/tmp/run-user-$(id -u)"
-    mkdir -p "$XDG_RUNTIME_DIR"
+# Snap strictly looks for /run/user/UID/bus. We must ensure this exact path exists.
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+if [ ! -d "$XDG_RUNTIME_DIR" ]; then
+    sudo mkdir -p "$XDG_RUNTIME_DIR"
+    sudo chown "$(id -u):$(id -g)" "$XDG_RUNTIME_DIR"
     chmod 700 "$XDG_RUNTIME_DIR"
 fi
 
@@ -106,10 +108,20 @@ sudo netfilter-persistent save >/dev/null 2>&1 || true
 # Restart LXD daemon to ensure network changes take effect before bootstrapping
 echo "  -> Restarting LXD daemon..."
 sudo snap restart lxd || true
-sleep 5
 
 # 4. Juju Controller & Model Provisioning
 echo "[*] Verifying Juju Controller..."
+
+# Active wait loop: LXD containers can take up to 30s to expose the Juju API after a daemon restart
+echo "  -> Waiting for Juju controller API to become responsive..."
+for i in {1..6}; do
+    if juju controllers &>/dev/null; then
+        break
+    fi
+    echo "     [API offline or booting, retrying in 10s...] ($i/6)"
+    sleep 10
+done
+
 CONTROLLERS_OUT=$(juju controllers 2>&1 || true)
 if echo "$CONTROLLERS_OUT" | grep -qi "No controllers registered"; then
     echo "[!] No Juju controller registered. Bootstrapping local controller..."
@@ -130,7 +142,10 @@ echo "[*] Verifying Juju Model..."
 MODELS_OUT=$(juju models 2>&1 || true)
 if ! echo "$MODELS_OUT" | grep -qw "terminal-model"; then
     echo "  -> Creating 'terminal-model'..."
-    juju add-model terminal-model || true
+    juju add-model terminal-model || {
+        echo "[!] Failed to create model. Controller API might still be unreachable."
+        exit 1
+    }
 else
     echo "  -> 'terminal-model' is already active."
 fi
