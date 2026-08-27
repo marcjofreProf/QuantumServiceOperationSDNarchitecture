@@ -1,4 +1,13 @@
 type: charm
+name: quantum-terminal
+summary: Juju charm for the Quantum Service SDN architecture terminal.
+description: |
+  This charm deploys and operates the Quantum Service SDN architecture 
+  terminal node. It integrates with the gNOI switching client to execute 
+  terminal-level operations and handle YANG model configurations.
+maintainers:
+  - "SDN Architecture Team <your.email@example.com>"
+
 bases:
   - build-on:
       - name: ubuntu
@@ -7,28 +16,31 @@ bases:
       - name: ubuntu
         channel: "22.04"
 
-summary: Quantum Terminal Switching Charm
-description: |
-  A Juju charm for operating the Quantum Service SDN architecture terminal.
+config:
+  options:
+    controller-ip:
+      default: "127.0.0.1"
+      type: string
+      description: "The IP address of the SDN controller."
 
 actions:
   create-cross-connect:
-  description: "Triggers a RESTCONF request using example-quantum-switching-terminal-service.yang."
-  params:
-    service-id:
-      type: string
-      description: "Service Identifier"
-      default: "example-qservice-01"
-    target-node-ip:
-      type: string
-      description: "IP address of the switch node"
-      default: "10.0.0.254"
-    ingress-port:
-      type: integer
-      default: 1
-    egress-port:
-      type: integer
-      default: 2
-    admin-state:
-      type: string
-      default: "ENABLED"
+    description: "Triggers a RESTCONF request using example-quantum-switching-terminal-service.yang."
+    params:
+      service-id:
+        type: string
+        description: "Service Identifier"
+        default: "example-qservice-01"
+      target-node-ip:
+        type: string
+        description: "IP address of the switch node"
+        default: "10.0.0.254"
+      ingress-port:
+        type: integer
+        default: 1
+      egress-port:
+        type: integer
+        default: 2
+      admin-state:
+        type: string
+        default: "ENABLED"
