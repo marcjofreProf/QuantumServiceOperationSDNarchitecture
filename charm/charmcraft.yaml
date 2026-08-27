@@ -8,6 +8,8 @@ description: |
 
 platforms:
   ubuntu@24.04:
+    build-on: [amd64]
+    build-for: [amd64]
 
 config:
   options:
