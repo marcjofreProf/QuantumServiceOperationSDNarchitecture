@@ -35,7 +35,8 @@ else
 fi
 
 echo "[*] Verifying system dependencies..."
-SYSTEM_DEPS=()
+# Pre-load required Charmcraft destructive-mode build dependencies
+SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel")
 
 if ! python3 -c "import ensurepip" &>/dev/null; then
     SYSTEM_DEPS+=("python3-venv")
