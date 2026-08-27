@@ -5,8 +5,6 @@ description: |
   This charm deploys and operates the Quantum Service SDN architecture 
   terminal node. It integrates with the gNOI switching client to execute 
   terminal-level operations and handle YANG model configurations.
-maintainers:
-  - "SDN Architecture Team <your.email@example.com>"
 
 bases:
   - build-on:
