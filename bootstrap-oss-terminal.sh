@@ -8,11 +8,19 @@ echo "=================================================================="
 echo "  Bootstrapping QuantumServiceOperationSDNarchitecture Environment"
 echo "=================================================================="
 
-# 0. Fix WSL Runtime Directory Permissions
+# 0. Fix WSL Runtime Directory Permissions & DBus
 if [ -z "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
     export XDG_RUNTIME_DIR="/tmp/run-user-$(id -u)"
     mkdir -p "$XDG_RUNTIME_DIR"
     chmod 700 "$XDG_RUNTIME_DIR"
+fi
+
+if [ ! -S "$XDG_RUNTIME_DIR/bus" ]; then
+    echo "  -> Initializing DBus session to prevent Snap/Juju timeouts..."
+    sudo apt-get update -yqq
+    sudo apt-get install -yqq dbus-user-session
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+    dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork 2>/dev/null || true
 fi
 
 # 1. System Dependency Checks & Fixes (ensurepip, pip3)
@@ -84,8 +92,16 @@ sudo lxc network set lxdbr0 ipv4.address auto || true
 sudo lxc network set lxdbr0 ipv4.nat true || true
 
 # Fix WSL2 LXD internet routing (Docker/WSL firewall conflict)
-echo "  -> Applying WSL2 iptables forwarding fix..."
+echo "  -> Applying and saving WSL2 iptables forwarding fix..."
 sudo iptables -P FORWARD ACCEPT || true
+
+if ! dpkg -l | grep -qw iptables-persistent; then
+    echo "  -> Installing iptables-persistent to make rules survive reboots..."
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq iptables-persistent
+fi
+sudo netfilter-persistent save >/dev/null 2>&1 || true
 
 # Restart LXD daemon to ensure network changes take effect before bootstrapping
 echo "  -> Restarting LXD daemon..."
