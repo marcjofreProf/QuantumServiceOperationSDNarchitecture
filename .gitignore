@@ -44,11 +44,9 @@ htmlcov/
 # Track source .proto and .yang files, ignore generated stubs and trees
 src/api/proto/*_pb2.py
 src/api/proto/*_pb2_grpc.py
-!src/api/__init__.py
-!src/api/proto/__init__.py
+*__init__.py
 src/api/grpc/*_pb2.py
 src/api/grpc/*_pb2_grpc.py
-!src/api/grpc/__init__.py
 src/api/yang/*.tree
 
 # ------------------------------------------
