@@ -94,7 +94,7 @@ sudo lxc network set lxdbr0 ipv4.address auto || true
 sudo lxc network set lxdbr0 ipv4.nat true || true
 
 # Fix WSL2 LXD internet routing (Docker/WSL firewall conflict)
-echo "  -> Applying and saving WSL2 iptables forwarding fix..."
+echo "  -> Applying and saving iptables forwarding fix..."
 sudo iptables -P FORWARD ACCEPT || true
 
 if ! dpkg -l | grep -qw iptables-persistent; then
@@ -122,9 +122,9 @@ for i in {1..6}; do
     sleep 10
 done
 
-CONTROLLERS_OUT=$(juju controllers 2>&1 || true)
-if echo "$CONTROLLERS_OUT" | grep -qi "No controllers registered"; then
-    echo "[!] No Juju controller registered. Bootstrapping local controller..."
+# Check if the specific controller exists instead of relying on grep
+if ! juju show-controller terminal-controller &>/dev/null; then
+    echo "[!] 'terminal-controller' not found. Bootstrapping local controller..."
     
     # Clean up any partial failed bootstrap state
     juju destroy-controller terminal-controller --destroy-all-models --yes 2>/dev/null || true
@@ -134,20 +134,20 @@ if echo "$CONTROLLERS_OUT" | grep -qi "No controllers registered"; then
         exit 1
     }
 else
-    echo "  -> Juju controller is active."
+    echo "  -> Juju controller 'terminal-controller' is active."
 fi
 
-# Check for and create the target model
+# Check for and switch to the target model
 echo "[*] Verifying Juju Model..."
-MODELS_OUT=$(juju models 2>&1 || true)
-if ! echo "$MODELS_OUT" | grep -qw "terminal-model"; then
+# Attempting to switch serves as both a verification check and sets the active context
+if ! juju switch terminal-controller:terminal-model &>/dev/null; then
     echo "  -> Creating 'terminal-model'..."
-    juju add-model terminal-model || {
+    juju add-model terminal-model terminal-controller || {
         echo "[!] Failed to create model. Controller API might still be unreachable."
         exit 1
     }
 else
-    echo "  -> 'terminal-model' is already active."
+    echo "  -> 'terminal-model' is already active and selected."
 fi
 
 # 5. Directory Structure Verification
