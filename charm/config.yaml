@@ -1,5 +1,0 @@
-options:
-  controller-ip:
-    default: "127.0.0.1"
-    type: string
-    description: "The IP address of the SDN controller."
