@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/deploy-juju-example-terminal.sh
+# tests/deploy-juju-example-switching-terminal.sh
 # Compiles example YANG models and deploys the Juju terminal charm.
 
 set -eo pipefail
@@ -43,11 +43,16 @@ echo "[*] Packing the charm with Charmcraft..."
 
 # 3. Ensure Target Controller/Model Context is Selected
 echo "[*] Selecting target Juju model (${CONTROLLER_NAME}:${MODEL_NAME})..."
-juju switch "${CONTROLLER_NAME}:${MODEL_NAME}" 2>/dev/null || juju switch "${MODEL_NAME}" 2>/dev/null || true
+if ! timeout 10s juju switch "${CONTROLLER_NAME}:${MODEL_NAME}"; then
+    echo "[!] Error: Cannot connect to Juju controller '${CONTROLLER_NAME}'. The API is unresponsive."
+    echo "    Run 'juju status' manually to debug, or restart WSL to fix LXD networking."
+    exit 1
+fi
 
 # 4. Deploy or Refresh the Terminal Charm
 echo "[*] Deploying/updating ${APP_NAME} charm..."
-if juju status 2>&1 | grep -q "$APP_NAME"; then
+# Apply timeout to prevent infinite hangs if Juju loses connection
+if timeout 15s juju status 2>&1 | grep -q "$APP_NAME"; then
     echo "  -> Application '$APP_NAME' is already deployed. Refreshing..."
     juju refresh "$APP_NAME" --path=./charm/quantum-terminal.charm --config controller-ip="10.0.0.1"
 else
