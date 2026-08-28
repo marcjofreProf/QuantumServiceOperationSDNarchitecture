@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tests/test-juju-example-switching-action.sh
-# Triggers the RESTCONF cross-connect action via the deployed Juju charm.
+# Triggers the RESTCONF cross-connect action sequence via the deployed Juju charm.
 
 set -eo pipefail
 
@@ -11,9 +11,11 @@ cd "$SCRIPT_DIR/.."
 CONTROLLER_NAME="terminal-controller"
 MODEL_NAME="terminal-model"
 APP_NAME="quantum-terminal"
+RESTCONF_ENDPOINT="http://10.0.0.2:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service"
+TEST_FAILED=0
 
 echo "=================================================================="
-echo "  Testing Juju Action: create-cross-connect"
+echo "  Testing Juju Action: Connect -> Status -> Disconnect -> Status"
 echo "=================================================================="
 
 # 2. Switch active context to target model
@@ -26,10 +28,12 @@ if [ -z "$UNIT_NAME" ]; then
     UNIT_NAME="${APP_NAME}/0"
 fi
 
-echo "[*] Triggering create-cross-connect action on ${UNIT_NAME}..."
+# -------------------------------------------------------------------
+# STEP 1: CONNECT
+# -------------------------------------------------------------------
+echo -e "\n[*] [1/4] Triggering create-cross-connect action on ${UNIT_NAME}..."
 
-# 4. Run action and capture output
-ACTION_OUTPUT=$(juju run "$UNIT_NAME" create-cross-connect \
+CONNECT_OUTPUT=$(juju run "$UNIT_NAME" create-cross-connect \
   service-id="example-qservice-opt-01" \
   target-node-ip="10.0.0.254" \
   ingress-port=1 \
@@ -37,10 +41,63 @@ ACTION_OUTPUT=$(juju run "$UNIT_NAME" create-cross-connect \
   admin-state="ENABLED" \
   --wait 5m 2>&1) || true
 
-echo "$ACTION_OUTPUT"
+echo "$CONNECT_OUTPUT"
 
+if echo "$CONNECT_OUTPUT" | grep -Ei -q "failed|error"; then
+    echo "[!] Step 1 (create-cross-connect) failed."
+    TEST_FAILED=1
+fi
+
+# -------------------------------------------------------------------
+# STEP 2: STATUS (POST-CONNECT)
+# -------------------------------------------------------------------
+echo -e "\n[*] [2/4] Querying RESTCONF Switch State (Post-Connect)..."
+echo "GET ${RESTCONF_ENDPOINT}"
+HTTP_CODE_CONN=$(curl -s -o /tmp/restconf_conn.json -w "%{http_code}" -X GET "${RESTCONF_ENDPOINT}" || true)
+echo "HTTP Response Code: ${HTTP_CODE_CONN}"
+echo "Payload Content:"
+if [ -s /tmp/restconf_conn.json ]; then
+    jq . /tmp/restconf_conn.json 2>/dev/null || cat /tmp/restconf_conn.json
+    echo ""
+else
+    echo "(No payload returned / Endpoint unavailable)"
+fi
+
+# -------------------------------------------------------------------
+# STEP 3: DISCONNECT
+# -------------------------------------------------------------------
+echo -e "\n[*] [3/4] Triggering delete-cross-connect action on ${UNIT_NAME}..."
+
+DISCONNECT_OUTPUT=$(juju run "$UNIT_NAME" delete-cross-connect \
+  service-id="example-qservice-opt-01" \
+  --wait 5m 2>&1) || true
+
+echo "$DISCONNECT_OUTPUT"
+
+if echo "$DISCONNECT_OUTPUT" | grep -Ei -q "failed|error"; then
+    echo "[!] Step 3 (delete-cross-connect) failed."
+    TEST_FAILED=1
+fi
+
+# -------------------------------------------------------------------
+# STEP 4: STATUS (POST-DISCONNECT)
+# -------------------------------------------------------------------
+echo -e "\n[*] [4/4] Querying RESTCONF Switch State (Post-Disconnect)..."
+echo "GET ${RESTCONF_ENDPOINT}"
+HTTP_CODE_DISC=$(curl -s -o /tmp/restconf_disc.json -w "%{http_code}" -X GET "${RESTCONF_ENDPOINT}" || true)
+echo "HTTP Response Code: ${HTTP_CODE_DISC}"
+echo "Payload Content:"
+if [ -s /tmp/restconf_disc.json ]; then
+    jq . /tmp/restconf_disc.json 2>/dev/null || cat /tmp/restconf_disc.json
+    echo ""
+else
+    echo "(Resource deleted / empty response)"
+fi
+
+# -------------------------------------------------------------------
 # 5. Strictly validate output for internal action failures
-if echo "$ACTION_OUTPUT" | grep -Ei -q "failed|error"; then
+# -------------------------------------------------------------------
+if [ "$TEST_FAILED" -ne 0 ]; then
     echo "=================================================================="
     echo "[!] Juju action failed. Check target RESTCONF controller connectivity."
     echo "=================================================================="
