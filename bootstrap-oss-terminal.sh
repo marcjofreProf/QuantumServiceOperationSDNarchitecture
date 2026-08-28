@@ -142,9 +142,28 @@ for i in {1..15}; do
     sleep 2
 done
 
+# ==============================================================================
+# Helper Function to scrub stale Juju LXD trust locks
+# ==============================================================================
+purge_juju_lxd_trust() {
+    echo "  -> Purging stale Juju credentials and LXD trust certificates..."
+    rm -rf ~/.local/share/juju
+    
+    # Target by explicit name
+    lxc config trust rm juju 2>/dev/null || true
+    sudo lxc config trust rm juju 2>/dev/null || true
+    
+    # Parse trust list and strictly match "juju" in the common name, extracting the fingerprint
+    for cert_fp in $(lxc config trust list --format csv 2>/dev/null | awk -F',' '$1=="juju" || $2=="juju" {print $3}'); do
+        if [ -n "$cert_fp" ]; then
+            lxc config trust rm "$cert_fp" 2>/dev/null || true
+            sudo lxc config trust rm "$cert_fp" 2>/dev/null || true
+        fi
+    done
+}
+
 # 4. Juju Controller & Model Provisioning
 echo "[*] Verifying Juju Controller..."
-
 CONTROLLER_NAME="terminal-controller"
 
 if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
@@ -166,12 +185,7 @@ if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
         juju kill-controller "$CONTROLLER_NAME" --yes --force 2>/dev/null || true
         juju unregister "$CONTROLLER_NAME" 2>/dev/null || true
         
-        # Scrub ghost certificates from LXD trust store
-        sudo lxc config trust rm juju 2>/dev/null || true
-        lxc config trust rm juju 2>/dev/null || true
-        
-        # Clear local credential cache collision
-        rm -rf ~/.local/share/juju
+        purge_juju_lxd_trust
         
         echo "[!] Re-bootstrapping local controller..."
         juju bootstrap localhost "$CONTROLLER_NAME" || {
@@ -181,9 +195,7 @@ if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
     fi
 else
     echo "[!] '$CONTROLLER_NAME' not registered. Ensuring clean trust state before bootstrap..."
-    # Prevent duplicate identity collisions on clean client setups
-    sudo lxc config trust rm juju 2>/dev/null || true
-    lxc config trust rm juju 2>/dev/null || true
+    purge_juju_lxd_trust
     
     juju bootstrap localhost "$CONTROLLER_NAME" || {
         echo "[!] Failed to bootstrap Juju controller."
