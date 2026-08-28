@@ -60,6 +60,28 @@ else
     juju deploy ./charm/quantum-terminal.charm "$APP_NAME" --config controller-ip="10.0.0.1"
 fi
 
+# 5. Wait for Machine and Application Readiness
+echo "[*] Waiting for ${APP_NAME} to become active (this may take a few minutes)..."
+while true; do
+    STATUS_OUT=$(juju status "$APP_NAME" 2>/dev/null || true)
+    
+    # Check if the unit has reached the active state
+    if echo "$STATUS_OUT" | grep -E -q "${APP_NAME}/[0-9]+.*active"; then
+        echo "  -> Application '${APP_NAME}' is fully active and ready."
+        break
+    fi
+    
+    # Guard against error states to prevent infinite looping
+    if echo "$STATUS_OUT" | grep -E -q "${APP_NAME}/[0-9]+.*error"; then
+        echo "[!] Application '${APP_NAME}' encountered an error during deployment."
+        echo "    Run 'juju status' or 'juju debug-log' for details."
+        break
+    fi
+    
+    echo "  -> Provisioning machines and allocating units... (checking again in 10s)"
+    sleep 10
+done
+
 echo "=================================================================="
 echo "[+] Setup complete! Run ./tests/test-juju-example-switching-action.sh to trigger the action."
 echo "=================================================================="
