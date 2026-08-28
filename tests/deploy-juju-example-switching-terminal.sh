@@ -2,9 +2,16 @@
 # tests/deploy-juju-example-terminal.sh
 # Compiles example YANG models and deploys the Juju terminal charm.
 
-set -e
+set -eo pipefail
+
+# Ensure script executes from the repository root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/.."
 
 VENV_PYANG=".venv/bin/pyang"
+CONTROLLER_NAME="terminal-controller"
+MODEL_NAME="terminal-model"
+APP_NAME="quantum-terminal"
 
 echo "=================================================================="
 echo "  Compiling Example YANG & Deploying Juju Terminal Charm"
@@ -18,18 +25,32 @@ else
     pyang -f tree src/api/yang/example-quantum-switching-terminal-service.yang -o src/api/yang/example-quantum-switching-terminal-service.tree
 fi
 
-# 2. Build the charm (NEW STEP)
+# 2. Safely Build and Package the Charm
 echo "[*] Packing the charm with Charmcraft..."
-cd charm/
-charmcraft pack --destructive-mode
-# Rename the dynamically generated file to exactly what the script expects
-mv *.charm quantum-terminal.charm
-cd ..
+(
+    cd charm/
+    # Clean up stale charms to prevent wildcard expansion errors on re-runs
+    rm -f *.charm
+    charmcraft pack --destructive-mode
+    # Safely identify and rename the newly packed charm
+    PACKED_CHARM=$(ls *.charm | head -n 1)
+    mv "$PACKED_CHARM" quantum-terminal.charm
+)
 
-# 3. Deploy the example terminal charm
-echo "[*] Deploying quantum-terminal charm..."
-juju deploy ./charm/quantum-terminal.charm --config controller-ip="10.0.0.1" || echo "[!] Juju deployment command failed. Ensure your Juju controller is active."
+# 3. Ensure Target Controller/Model Context is Selected
+echo "[*] Selecting target Juju model (${CONTROLLER_NAME}:${MODEL_NAME})..."
+juju switch "${CONTROLLER_NAME}:${MODEL_NAME}" 2>/dev/null || juju switch "${MODEL_NAME}" 2>/dev/null || true
+
+# 4. Deploy or Refresh the Terminal Charm
+echo "[*] Deploying/updating ${APP_NAME} charm..."
+if juju status 2>&1 | grep -q "$APP_NAME"; then
+    echo "  -> Application '$APP_NAME' is already deployed. Refreshing..."
+    juju refresh "$APP_NAME" --path=./charm/quantum-terminal.charm --config controller-ip="10.0.0.1"
+else
+    echo "  -> Deploying fresh instance of '$APP_NAME'..."
+    juju deploy ./charm/quantum-terminal.charm "$APP_NAME" --config controller-ip="10.0.0.1"
+fi
 
 echo "=================================================================="
-echo "[+] Setup complete. Run ./tests/test-juju-example-switching-action.sh to trigger the action."
+echo "[+] Setup complete! Run ./tests/test-juju-example-switching-action.sh to trigger the action."
 echo "=================================================================="
