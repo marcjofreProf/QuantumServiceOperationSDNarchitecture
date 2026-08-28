@@ -195,7 +195,7 @@ fi
 echo "[*] Verifying Juju Model..."
 if ! timeout 5s juju switch "${CONTROLLER_NAME}:terminal-model" &>/dev/null; then
     echo "  -> Creating 'terminal-model'..."
-    juju add-model terminal-model "$CONTROLLER_NAME" || {
+    juju add-model terminal-model -c "$CONTROLLER_NAME" || {
         echo "[!] Failed to create model."
         exit 1
     }
