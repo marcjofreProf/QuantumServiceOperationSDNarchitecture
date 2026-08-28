@@ -29,12 +29,14 @@ fi
 echo "[*] Triggering create-cross-connect action on ${UNIT_NAME}..."
 
 # 4. Run action and return exact stdout/stderr status
+# Added --wait 5m to prevent Juju from prematurely timing out on queued tasks
 if ACTION_OUTPUT=$(juju run "$UNIT_NAME" create-cross-connect \
   service-id="example-qservice-opt-01" \
   target-node-ip="10.0.0.254" \
   ingress-port=1 \
   egress-port=2 \
-  admin-state="ENABLED" 2>&1); then
+  admin-state="ENABLED" \
+  --wait 5m 2>&1); then
     echo "$ACTION_OUTPUT"
     echo "=================================================================="
     echo "[+] Action execution succeeded."
