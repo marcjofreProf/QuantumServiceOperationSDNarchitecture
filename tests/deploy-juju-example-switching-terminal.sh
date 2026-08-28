@@ -67,8 +67,14 @@ echo "[*] Deploying/updating ${APP_NAME} charm..."
 # Check if application exists and is in an error state
 if juju status "$APP_NAME" 2>/dev/null | grep -E -q "error"; then
     echo "  -> Application '$APP_NAME' is in an error state. Purging before redeploy..."
-    juju remove-application "$APP_NAME" --force --no-wait 2>/dev/null || true
-    sleep 5
+    juju remove-application "$APP_NAME" --force 2>/dev/null || true
+    
+    # Wait synchronously until the application is fully removed from Juju status
+    while juju status 2>/dev/null | grep -q "$APP_NAME"; do
+        echo "     [Waiting for Juju to complete application teardown...]"
+        sleep 4
+    done
+    echo "  -> Purge complete."
 fi
 
 # Apply timeout to prevent infinite hangs if Juju loses connection
