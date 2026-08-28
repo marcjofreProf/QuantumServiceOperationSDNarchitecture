@@ -72,24 +72,16 @@ echo "[*] Deploying/updating ${APP_NAME} charm..."
 
 APP_PURGED=false
 
-# Check if application exists (status returns 0) and is in an error state
-if juju status "$APP_NAME" &>/dev/null; then
-    if juju status "$APP_NAME" 2>/dev/null | grep -q "error"; then
-        echo "  -> Application '$APP_NAME' is in an error state. Purging before redeploy..."
-        juju remove-application "$APP_NAME" --force --no-wait 2>/dev/null || true
-        
-        # Synchronously wait using Juju's native exit codes.
-        # Once the app is fully deleted, 'juju status <app>' will throw an error and break the loop.
-        while juju status "$APP_NAME" &>/dev/null; do
-            echo "     [Waiting for Juju to complete application teardown...]"
-            sleep 4
-        done
-        
-        # Add a brief buffer to ensure Juju database syncing completes before re-deploying
-        sleep 3
-        echo "  -> Purge complete."
-        APP_PURGED=true
-    fi
+# If the app is in an error state, nuking the model is faster and safer than waiting for a zombie unit to die
+if juju status "$APP_NAME" &>/dev/null && juju status "$APP_NAME" 2>/dev/null | grep -E -q "error|dying"; then
+    echo "  -> Application '$APP_NAME' is broken. Destroying and recreating the model for a clean slate..."
+    juju destroy-model "$MODEL_NAME" --force --yes --no-wait --destroy-storage 2>/dev/null || true
+    
+    echo "     [Waiting for model teardown...]"
+    sleep 8
+    
+    juju add-model "$MODEL_NAME" 2>/dev/null || true
+    APP_PURGED=true
 fi
 
 # Check if application exists and was not just purged
