@@ -32,14 +32,22 @@ echo "[*] Packing the charm with Charmcraft..."
     
     # ---------------------------------------------------------
     # CRITICAL FIX: Guarantee Python 3 interpreter shebang line
+    # and strip Windows CRLF line endings (WSL compatibility)
     # ---------------------------------------------------------
     if [ -f "src/charm.py" ]; then
-        echo "  -> Injecting valid Python 3 shebang into charm entry point..."
+        echo "  -> Fixing line endings and injecting valid Python 3 shebang..."
+        
+        # Strip Windows carriage returns to prevent '/usr/bin/env python3\r' errors
+        sed -i 's/\r$//' src/*.py 2>/dev/null || true
+        
         # Remove any existing malformed shebang lines
         sed -i '/^#!/d' src/charm.py
+        
         # Prepend valid Python 3 shebang to line 1
         sed -i '1i#!/usr/bin/env python3' src/charm.py
-        chmod +x src/charm.py
+        
+        # Ensure execution bits are set
+        chmod +x src/*.py 2>/dev/null || true
     fi
     
     # Clean up stale charms to prevent wildcard expansion errors on re-runs
@@ -62,21 +70,26 @@ fi
 # 4. Deploy or Refresh the Terminal Charm
 echo "[*] Deploying/updating ${APP_NAME} charm..."
 
+APP_PURGED=false
+
 # Check if application exists and is in an error state
 if juju status "$APP_NAME" 2>/dev/null | grep -E -q "error"; then
     echo "  -> Application '$APP_NAME' is in an error state. Purging before redeploy..."
     juju remove-application "$APP_NAME" --force 2>/dev/null || true
     
     # Synchronously wait for complete removal to avoid race conditions
-    while juju status 2>/dev/null | grep -q "$APP_NAME"; do
+    # We use a strict regex to only match the active application row, not lingering charms
+    while juju status 2>/dev/null | grep -E -q "^${APP_NAME}[[:space:]]"; do
         echo "     [Waiting for Juju to complete application teardown...]"
         sleep 4
     done
     echo "  -> Purge complete."
+    APP_PURGED=true
 fi
 
 # Apply timeout to prevent infinite hangs if Juju loses connection
-if timeout 15s juju status 2>&1 | grep -q "$APP_NAME"; then
+# Strictly check if the application is still actively deployed in the 'App' column
+if [ "$APP_PURGED" = false ] && juju status 2>/dev/null | grep -E -q "^${APP_NAME}[[:space:]]"; then
     echo "  -> Application '$APP_NAME' is already deployed. Refreshing..."
     juju refresh "$APP_NAME" --path=./charm/quantum-terminal.charm --config controller-ip="10.0.0.1"
 else
