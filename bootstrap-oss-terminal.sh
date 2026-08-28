@@ -143,23 +143,49 @@ for i in {1..15}; do
 done
 
 # ==============================================================================
-# Helper Function to scrub stale Juju LXD trust locks
+# Purge Ghost LXD Containers and Stale Juju Certificates
 # ==============================================================================
 purge_juju_lxd_trust() {
-    echo "  -> Purging stale Juju credentials and LXD trust certificates..."
-    rm -rf ~/.local/share/juju
+    echo "  -> Purging ghost Juju containers and stale LXD trust certificates..."
     
-    # Target by explicit name
-    lxc config trust rm juju 2>/dev/null || true
-    sudo lxc config trust rm juju 2>/dev/null || true
-    
-    # Parse trust list and strictly match "juju" in the common name, extracting the fingerprint
-    for cert_fp in $(lxc config trust list --format csv 2>/dev/null | awk -F',' '$1=="juju" || $2=="juju" {print $3}'); do
-        if [ -n "$cert_fp" ]; then
-            lxc config trust rm "$cert_fp" 2>/dev/null || true
-            sudo lxc config trust rm "$cert_fp" 2>/dev/null || true
-        fi
+    # Force delete lingering Juju LXD instances that hold locks
+    for instance in $(lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
+        echo "     [Removing ghost container: ${instance}]"
+        lxc delete "$instance" --force 2>/dev/null || sudo lxc delete "$instance" --force 2>/dev/null || true
     done
+
+    # Clean local Juju client caches
+    rm -rf ~/.local/share/juju ~/.config/juju
+
+    # Parse LXD JSON trust store to strip 'juju' certs by fingerprint and name
+    python3 - << 'EOF'
+import json, subprocess
+
+def run_cmd(cmd):
+    try:
+        return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return ""
+
+for sudo_prefix in [[], ["sudo"]]:
+    raw_json = run_cmd(sudo_prefix + ["lxc", "config", "trust", "list", "--format", "json"])
+    if raw_json:
+        try:
+            certs = json.loads(raw_json)
+            for cert in certs:
+                fp = cert.get("fingerprint", "")
+                name = cert.get("name", "")
+                if "juju" in name.lower() or name == "juju":
+                    if fp:
+                        run_cmd(sudo_prefix + ["lxc", "config", "trust", "rm", fp])
+                    if name:
+                        run_cmd(sudo_prefix + ["lxc", "config", "trust", "rm", name])
+        except Exception:
+            pass
+
+run_cmd(["lxc", "config", "trust", "rm", "juju"])
+run_cmd(["sudo", "lxc", "config", "trust", "rm", "juju"])
+EOF
 }
 
 # 4. Juju Controller & Model Provisioning
