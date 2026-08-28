@@ -31,17 +31,15 @@ echo "[*] Packing the charm with Charmcraft..."
     cd charm/
     
     # ---------------------------------------------------------
-    # CRITICAL FIX: Juju requires execution bits and a shebang
+    # CRITICAL FIX: Guarantee Python 3 interpreter shebang line
     # ---------------------------------------------------------
     if [ -f "src/charm.py" ]; then
-        # 1. Guarantee execution permissions
-        chmod +x src/*.py 2>/dev/null || true
-        
-        # 2. Inject standard Python3 shebang if it is missing
-        if ! head -n 1 src/charm.py | grep -q "^#!"; then
-            echo "  -> Injecting missing Python shebang into src/charm.py"
-            sed -i '1s/^/#!\/usr\/bin\/env python3\n/' src/charm.py
-        fi
+        echo "  -> Injecting valid Python 3 shebang into charm entry point..."
+        # Remove any existing malformed shebang lines
+        sed -i '/^#!/d' src/charm.py
+        # Prepend valid Python 3 shebang to line 1
+        sed -i '1i#!/usr/bin/env python3' src/charm.py
+        chmod +x src/charm.py
     fi
     
     # Clean up stale charms to prevent wildcard expansion errors on re-runs
@@ -69,7 +67,7 @@ if juju status "$APP_NAME" 2>/dev/null | grep -E -q "error"; then
     echo "  -> Application '$APP_NAME' is in an error state. Purging before redeploy..."
     juju remove-application "$APP_NAME" --force 2>/dev/null || true
     
-    # Wait synchronously until the application is fully removed from Juju status
+    # Synchronously wait for complete removal to avoid race conditions
     while juju status 2>/dev/null | grep -q "$APP_NAME"; do
         echo "     [Waiting for Juju to complete application teardown...]"
         sleep 4
@@ -87,7 +85,7 @@ else
 fi
 
 # 5. Wait for Machine and Application Readiness
-echo "[*] Waiting for ${APP_NAME} to become active (this may take a few minutes)..."
+echo "[*] Waiting for ${APP_NAME} to become active..."
 while true; do
     STATUS_OUT=$(juju status "$APP_NAME" 2>/dev/null || true)
     
