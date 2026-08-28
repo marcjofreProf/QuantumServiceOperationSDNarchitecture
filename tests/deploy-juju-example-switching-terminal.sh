@@ -12,6 +12,7 @@ VENV_PYANG=".venv/bin/pyang"
 CONTROLLER_NAME="terminal-controller"
 MODEL_NAME="terminal-model"
 APP_NAME="quantum-terminal"
+RESTCONF_CONTROLLER_IP="10.0.0.2"
 
 echo "=================================================================="
 echo "  Compiling Example YANG & Deploying Juju Terminal Charm"
@@ -68,7 +69,7 @@ if ! timeout 10s juju switch "${CONTROLLER_NAME}:${MODEL_NAME}"; then
 fi
 
 # 4. Deploy or Refresh the Terminal Charm
-echo "[*] Deploying/updating ${APP_NAME} charm..."
+echo "[*] Deploying/updating ${APP_NAME} charm (RESTCONF Controller IP: ${RESTCONF_CONTROLLER_IP})..."
 
 APP_PURGED=false
 
@@ -89,10 +90,10 @@ fi
 # Check if application exists and was not just purged
 if [ "$APP_PURGED" = false ] && juju status 2>/dev/null | grep -E -q "^${APP_NAME}[[:space:]]"; then
     echo "  -> Application '$APP_NAME' is already deployed. Refreshing..."
-    juju refresh "$APP_NAME" --path=./charm/quantum-terminal.charm --config controller-ip="10.0.0.1"
+    juju refresh "$APP_NAME" --path=./charm/quantum-terminal.charm --config controller-ip="$RESTCONF_CONTROLLER_IP"
 else
     echo "  -> Deploying fresh instance of '$APP_NAME'..."
-    juju deploy ./charm/quantum-terminal.charm "$APP_NAME" --config controller-ip="10.0.0.1"
+    juju deploy ./charm/quantum-terminal.charm "$APP_NAME" --config controller-ip="$RESTCONF_CONTROLLER_IP"
 fi
 
 # 5. Wait for Machine and Application Readiness
@@ -100,9 +101,9 @@ echo "[*] Waiting for ${APP_NAME} to become active..."
 while true; do
     STATUS_OUT=$(juju status "$APP_NAME" 2>/dev/null || true)
     
-    # Check if the unit has reached the active or unknown state (charm deployed and settled)
-    if echo "$STATUS_OUT" | grep -E -q "${APP_NAME}/[0-9]+.*(active|unknown)"; then
-        echo "  -> Application '${APP_NAME}' has finished deploying and is ready."
+    # Ensure the workload is active/unknown AND the agent is strictly 'idle'
+    if echo "$STATUS_OUT" | grep -E -q "${APP_NAME}/[0-9]+.*(active|unknown).*idle"; then
+        echo "  -> Application '${APP_NAME}' has finished deploying and the agent is idle."
         break
     fi
     
