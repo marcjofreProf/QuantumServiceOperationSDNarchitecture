@@ -29,9 +29,13 @@ fi
 echo "[*] Packing the charm with Charmcraft..."
 (
     cd charm/
+    # Ensure all charm entry points have execution permissions before packing
+    chmod +x src/*.py 2>/dev/null || true
+    
     # Clean up stale charms to prevent wildcard expansion errors on re-runs
     rm -f *.charm
     charmcraft pack --destructive-mode
+    
     # Safely identify and rename the newly packed charm
     PACKED_CHARM=$(ls *.charm | head -n 1)
     mv "$PACKED_CHARM" quantum-terminal.charm
