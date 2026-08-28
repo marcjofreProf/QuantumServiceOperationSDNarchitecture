@@ -100,9 +100,9 @@ echo "[*] Waiting for ${APP_NAME} to become active..."
 while true; do
     STATUS_OUT=$(juju status "$APP_NAME" 2>/dev/null || true)
     
-    # Check if the unit has reached the active state
-    if echo "$STATUS_OUT" | grep -E -q "${APP_NAME}/[0-9]+.*active"; then
-        echo "  -> Application '${APP_NAME}' is fully active and ready."
+    # Check if the unit has reached the active or unknown state (charm deployed and settled)
+    if echo "$STATUS_OUT" | grep -E -q "${APP_NAME}/[0-9]+.*(active|unknown)"; then
+        echo "  -> Application '${APP_NAME}' has finished deploying and is ready."
         break
     fi
     
