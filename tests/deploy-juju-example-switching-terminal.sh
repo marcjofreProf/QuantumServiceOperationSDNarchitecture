@@ -72,10 +72,12 @@ echo "[*] Deploying/updating ${APP_NAME} charm..."
 
 APP_PURGED=false
 
-# If the app is in an error state, nuking the model is faster and safer than waiting for a zombie unit to die
+# If the app is in an error or dying state, tear down the model automatically
 if juju status "$APP_NAME" &>/dev/null && juju status "$APP_NAME" 2>/dev/null | grep -E -q "error|dying"; then
-    echo "  -> Application '$APP_NAME' is broken. Destroying and recreating the model for a clean slate..."
-    juju destroy-model "$MODEL_NAME" --force --yes --no-wait --destroy-storage 2>/dev/null || true
+    echo "  -> Application '$APP_NAME' is broken. Recreating the model..."
+    
+    # Provide the actual model name to bypass the destruction confirmation prompt
+    echo "$MODEL_NAME" | juju destroy-model "$MODEL_NAME" --force --no-wait --destroy-storage 2>/dev/null || true
     
     echo "     [Waiting for model teardown...]"
     sleep 8
