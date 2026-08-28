@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tests/test-juju-example-switching-action.sh
-# Triggers the RESTCONF cross-connect action sequence via the deployed Juju charm.
+# Triggers the RESTCONF cross-connect action sequence with strict automated HTTP state assertions.
 
 set -eo pipefail
 
@@ -49,7 +49,7 @@ if echo "$CONNECT_OUTPUT" | grep -Ei -q "failed|error"; then
 fi
 
 # -------------------------------------------------------------------
-# STEP 2: STATUS (POST-CONNECT)
+# STEP 2: STATUS ASSERTION (POST-CONNECT)
 # -------------------------------------------------------------------
 echo -e "\n[*] [2/4] Querying RESTCONF Switch State (Post-Connect)..."
 echo "GET ${RESTCONF_ENDPOINT}"
@@ -61,6 +61,14 @@ if [ -s /tmp/restconf_conn.json ]; then
     echo ""
 else
     echo "(No payload returned / Endpoint unavailable)"
+fi
+
+# Assertion 1: Must be HTTP 200 OK
+if [ "$HTTP_CODE_CONN" -eq 200 ]; then
+    echo "[+] Assertion Passed: HTTP 200 received (Active cross-connect verified)."
+else
+    echo "[!] Assertion Failed: Expected HTTP 200, but received HTTP $HTTP_CODE_CONN."
+    TEST_FAILED=1
 fi
 
 # -------------------------------------------------------------------
@@ -80,7 +88,7 @@ if echo "$DISCONNECT_OUTPUT" | grep -Ei -q "failed|error"; then
 fi
 
 # -------------------------------------------------------------------
-# STEP 4: STATUS (POST-DISCONNECT)
+# STEP 4: STATUS ASSERTION (POST-DISCONNECT)
 # -------------------------------------------------------------------
 echo -e "\n[*] [4/4] Querying RESTCONF Switch State (Post-Disconnect)..."
 echo "GET ${RESTCONF_ENDPOINT}"
@@ -94,16 +102,25 @@ else
     echo "(Resource deleted / empty response)"
 fi
 
+# Assertion 2: Must be HTTP 404 NOT FOUND
+if [ "$HTTP_CODE_DISC" -eq 404 ]; then
+    echo "[+] Assertion Passed: HTTP 404 received (Cross-connect successfully cleared)."
+else
+    echo "[!] Assertion Failed: Expected HTTP 404, but received HTTP $HTTP_CODE_DISC."
+    TEST_FAILED=1
+fi
+
 # -------------------------------------------------------------------
-# 5. Strictly validate output for internal action failures
+# 5. Final Validation and Execution Exit Code
 # -------------------------------------------------------------------
 if [ "$TEST_FAILED" -ne 0 ]; then
     echo "=================================================================="
-    echo "[!] Juju action failed. Check target RESTCONF controller connectivity."
+    echo "[!] Test failed: One or more Juju actions or HTTP assertions failed."
     echo "=================================================================="
     exit 1
 else
     echo "=================================================================="
-    echo "[+] Action execution succeeded."
+    echo "[+] Action execution succeeded and all state assertions passed."
     echo "=================================================================="
+    exit 0
 fi
