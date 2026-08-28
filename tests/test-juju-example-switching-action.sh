@@ -28,23 +28,25 @@ fi
 
 echo "[*] Triggering create-cross-connect action on ${UNIT_NAME}..."
 
-# 4. Run action and return exact stdout/stderr status
-# Added --wait 5m to prevent Juju from prematurely timing out on queued tasks
-if ACTION_OUTPUT=$(juju run "$UNIT_NAME" create-cross-connect \
+# 4. Run action and capture output
+ACTION_OUTPUT=$(juju run "$UNIT_NAME" create-cross-connect \
   service-id="example-qservice-opt-01" \
   target-node-ip="10.0.0.254" \
   ingress-port=1 \
   egress-port=2 \
   admin-state="ENABLED" \
-  --wait 5m 2>&1); then
-    echo "$ACTION_OUTPUT"
+  --wait 5m 2>&1) || true
+
+echo "$ACTION_OUTPUT"
+
+# 5. Strictly validate output for internal action failures
+if echo "$ACTION_OUTPUT" | grep -Ei -q "failed|error"; then
+    echo "=================================================================="
+    echo "[!] Juju action failed. Check target RESTCONF controller connectivity."
+    echo "=================================================================="
+    exit 1
+else
     echo "=================================================================="
     echo "[+] Action execution succeeded."
     echo "=================================================================="
-else
-    echo "$ACTION_OUTPUT"
-    echo "=================================================================="
-    echo "[!] Juju action failed. Verify unit status with 'juju status'."
-    echo "=================================================================="
-    exit 1
 fi
