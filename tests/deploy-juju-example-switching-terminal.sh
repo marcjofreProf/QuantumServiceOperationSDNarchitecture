@@ -29,8 +29,20 @@ fi
 echo "[*] Packing the charm with Charmcraft..."
 (
     cd charm/
-    # Ensure all charm entry points have execution permissions before packing
-    chmod +x src/*.py 2>/dev/null || true
+    
+    # ---------------------------------------------------------
+    # CRITICAL FIX: Juju requires execution bits and a shebang
+    # ---------------------------------------------------------
+    if [ -f "src/charm.py" ]; then
+        # 1. Guarantee execution permissions
+        chmod +x src/*.py 2>/dev/null || true
+        
+        # 2. Inject standard Python3 shebang if it is missing
+        if ! head -n 1 src/charm.py | grep -q "^#!"; then
+            echo "  -> Injecting missing Python shebang into src/charm.py"
+            sed -i '1s/^/#!\/usr\/bin\/env python3\n/' src/charm.py
+        fi
+    fi
     
     # Clean up stale charms to prevent wildcard expansion errors on re-runs
     rm -f *.charm
@@ -51,6 +63,14 @@ fi
 
 # 4. Deploy or Refresh the Terminal Charm
 echo "[*] Deploying/updating ${APP_NAME} charm..."
+
+# Check if application exists and is in an error state
+if juju status "$APP_NAME" 2>/dev/null | grep -E -q "error"; then
+    echo "  -> Application '$APP_NAME' is in an error state. Purging before redeploy..."
+    juju remove-application "$APP_NAME" --force --no-wait 2>/dev/null || true
+    sleep 5
+fi
+
 # Apply timeout to prevent infinite hangs if Juju loses connection
 if timeout 15s juju status 2>&1 | grep -q "$APP_NAME"; then
     echo "  -> Application '$APP_NAME' is already deployed. Refreshing..."
@@ -74,7 +94,7 @@ while true; do
     # Guard against error states to prevent infinite looping
     if echo "$STATUS_OUT" | grep -E -q "${APP_NAME}/[0-9]+.*error"; then
         echo "[!] Application '${APP_NAME}' encountered an error during deployment."
-        echo "    Run 'juju status' or 'juju debug-log' for details."
+        echo "    Run 'juju debug-log --replay' for detailed Python tracebacks."
         break
     fi
     
