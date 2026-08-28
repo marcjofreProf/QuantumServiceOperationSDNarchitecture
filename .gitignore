@@ -44,7 +44,6 @@ htmlcov/
 # Track source .proto and .yang files, ignore generated stubs and trees
 src/api/proto/*_pb2.py
 src/api/proto/*_pb2_grpc.py
-*__init__.py
 src/api/grpc/*_pb2.py
 src/api/grpc/*_pb2_grpc.py
 src/api/yang/*.tree
@@ -56,6 +55,7 @@ src/api/yang/*.tree
 charm/.charmcraft/
 charm/build/
 *.charm
+juju-crashdump-*
 
 # ------------------------------------------
 # Local Configurations & Security Credentials
