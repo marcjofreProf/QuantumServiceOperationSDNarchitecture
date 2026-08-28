@@ -43,3 +43,11 @@ actions:
       admin-state:
         type: string
         default: "ENABLED"
+
+  delete-cross-connect:
+    description: "Triggers a RESTCONF DELETE request to remove the cross-connect service."
+    params:
+      service-id:
+        type: string
+        description: "Service Identifier to delete"
+        default: "example-qservice-01"
