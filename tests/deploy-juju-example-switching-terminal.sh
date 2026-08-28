@@ -73,7 +73,7 @@ echo "[*] Deploying/updating ${APP_NAME} charm..."
 APP_PURGED=false
 
 # If the app is in an error or dying state, tear down the model automatically
-if juju status "$APP_NAME" &>/dev/null && juju status "$APP_NAME" 2>/dev/null | grep -E -q "error|dying"; then
+if juju status 2>/dev/null | grep -E -q "^${APP_NAME}[[:space:]]" && juju status "$APP_NAME" 2>/dev/null | grep -E -q "error|dying"; then
     echo "  -> Application '$APP_NAME' is broken. Recreating the model..."
     
     # Provide the actual model name to bypass the destruction confirmation prompt
@@ -87,7 +87,7 @@ if juju status "$APP_NAME" &>/dev/null && juju status "$APP_NAME" 2>/dev/null | 
 fi
 
 # Check if application exists and was not just purged
-if [ "$APP_PURGED" = false ] && juju status "$APP_NAME" &>/dev/null; then
+if [ "$APP_PURGED" = false ] && juju status 2>/dev/null | grep -E -q "^${APP_NAME}[[:space:]]"; then
     echo "  -> Application '$APP_NAME' is already deployed. Refreshing..."
     juju refresh "$APP_NAME" --path=./charm/quantum-terminal.charm --config controller-ip="10.0.0.1"
 else
