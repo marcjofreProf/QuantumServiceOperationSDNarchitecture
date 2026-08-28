@@ -72,24 +72,28 @@ echo "[*] Deploying/updating ${APP_NAME} charm..."
 
 APP_PURGED=false
 
-# Check if application exists and is in an error state
-if juju status "$APP_NAME" 2>/dev/null | grep -E -q "error"; then
-    echo "  -> Application '$APP_NAME' is in an error state. Purging before redeploy..."
-    juju remove-application "$APP_NAME" --force 2>/dev/null || true
-    
-    # Synchronously wait for complete removal to avoid race conditions
-    # We use a strict regex to only match the active application row, not lingering charms
-    while juju status 2>/dev/null | grep -E -q "^${APP_NAME}[[:space:]]"; do
-        echo "     [Waiting for Juju to complete application teardown...]"
-        sleep 4
-    done
-    echo "  -> Purge complete."
-    APP_PURGED=true
+# Check if application exists (status returns 0) and is in an error state
+if juju status "$APP_NAME" &>/dev/null; then
+    if juju status "$APP_NAME" 2>/dev/null | grep -q "error"; then
+        echo "  -> Application '$APP_NAME' is in an error state. Purging before redeploy..."
+        juju remove-application "$APP_NAME" --force --no-wait 2>/dev/null || true
+        
+        # Synchronously wait using Juju's native exit codes.
+        # Once the app is fully deleted, 'juju status <app>' will throw an error and break the loop.
+        while juju status "$APP_NAME" &>/dev/null; do
+            echo "     [Waiting for Juju to complete application teardown...]"
+            sleep 4
+        done
+        
+        # Add a brief buffer to ensure Juju database syncing completes before re-deploying
+        sleep 3
+        echo "  -> Purge complete."
+        APP_PURGED=true
+    fi
 fi
 
-# Apply timeout to prevent infinite hangs if Juju loses connection
-# Strictly check if the application is still actively deployed in the 'App' column
-if [ "$APP_PURGED" = false ] && juju status 2>/dev/null | grep -E -q "^${APP_NAME}[[:space:]]"; then
+# Check if application exists and was not just purged
+if [ "$APP_PURGED" = false ] && juju status "$APP_NAME" &>/dev/null; then
     echo "  -> Application '$APP_NAME' is already deployed. Refreshing..."
     juju refresh "$APP_NAME" --path=./charm/quantum-terminal.charm --config controller-ip="10.0.0.1"
 else
