@@ -84,8 +84,8 @@ run_lifecycle_benchmark() {
 # Run All 4 Protocol Modes
 run_lifecycle_benchmark "1" "RESTCONF -> NETCONF" "RESTCONF" "NETCONF"
 run_lifecycle_benchmark "2" "RESTCONF -> gNOI"    "RESTCONF" "gNOI"
-run_lifecycle_benchmark "3" "gNOI/gRPC -> NETCONF" "gRPC"     "NETCONF"
-run_lifecycle_benchmark "4" "gNOI/gRPC -> gNOI"    "gRPC"     "gNOI"
+run_lifecycle_benchmark "3" "gNMI/gRPC -> NETCONF" "gRPC"     "NETCONF"
+run_lifecycle_benchmark "4" "gNMI/gRPC -> gNOI"    "gRPC"     "gNOI"
 
 # Print Final Performance Table
 echo "=================================================================================================="
