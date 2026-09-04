@@ -24,16 +24,6 @@ if [ ! -S "$XDG_RUNTIME_DIR/bus" ]; then
     dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork 2>/dev/null || true
 fi
 
-# 1. System Dependency Checks, Time Sync & Fixes
-echo "[*] Synchronizing system time (OS clock drift fix)..."
-if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
-    sudo systemctl restart systemd-timesyncd || true
-else
-    sudo apt-get update -yqq
-    sudo apt-get install -yqq ntpdate
-    sudo ntpdate pool.ntp.org 2>/dev/null || true
-fi
-
 echo "[*] Verifying system dependencies..."
 # Pre-load required Charmcraft destructive-mode build dependencies
 SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel")
