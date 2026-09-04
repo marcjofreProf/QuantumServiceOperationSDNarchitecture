@@ -62,8 +62,8 @@ if [ ! -S "$XDG_RUNTIME_DIR/bus" ]; then
 fi
 
 echo "[*] Verifying system dependencies..."
-# Pre-load required Charmcraft destructive-mode build dependencies & standard shadow/passwd utils
-SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd")
+# Pre-load required Charmcraft build dependencies, iptables, and shadow/passwd utils
+SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd" "iptables")
 
 if ! python3 -c "import ensurepip" &>/dev/null; then
     SYSTEM_DEPS+=("python3-venv")
@@ -109,15 +109,10 @@ fi
 
 if [ "$(id -gn)" != "lxd" ] && ! id -nG | grep -qw "lxd"; then
     echo "  -> Elevating LXD group session and restarting bootstrap process..."
-    if ! command -v sg &>/dev/null; then
-        echo "  -> Utility 'sg' not found. Installing 'passwd' package..."
-        sudo apt-get update -yqq && sudo apt-get install -yqq passwd
-    fi
-    
     if command -v sg &>/dev/null; then
         exec sg lxd -c "$0 $*"
     else
-        echo "[!] Warning: 'sg' utility unavailable. Please execute 'newgrp lxd' manually."
+        echo "[!] Warning: 'sg' utility unavailable. Executing next steps via sudo context."
     fi
 fi
 
@@ -156,7 +151,7 @@ fi
 # Active wait loop for LXD API to prevent Charmcraft/Juju timeouts
 echo "  -> Waiting for LXD API to become fully responsive..."
 for i in {1..15}; do
-    if timeout 3s lxc info &>/dev/null; then
+    if timeout 3s sudo lxc info &>/dev/null; then
         echo "  -> LXD daemon is ready."
         break
     fi
@@ -199,7 +194,7 @@ purge_juju_lxd_trust() {
     echo "  -> Purging ghost Juju containers and stale LXD trust certificates..."
     
     # Force delete lingering Juju LXD instances that hold locks
-    for instance in $(lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
+    for instance in $(sudo lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
         echo "     [Removing ghost container: ${instance}]"
         lxc delete "$instance" --force 2>/dev/null || sudo lxc delete "$instance" --force 2>/dev/null || true
     done
