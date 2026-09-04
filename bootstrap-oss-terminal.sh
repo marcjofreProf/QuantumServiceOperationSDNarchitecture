@@ -66,8 +66,16 @@ fi
 # 2. LXD Group Check & Persistent Session Elevation (Placed before Juju for networking)
 echo "[*] Verifying LXD environment & permissions..."
 if ! command -v lxd &>/dev/null; then
-    echo "  -> LXD is missing. Installing via snap..."
-    sudo snap install lxd
+    echo "  -> LXD is missing. Cleaning stale namespaces and installing via snap..."
+    sudo snap discard-ns lxd 2>/dev/null || true
+    sudo systemctl reset-failed snap.lxd.daemon.service 2>/dev/null || true
+    
+    if ! sudo snap install lxd; then
+        echo "  -> LXD snap install failed. Restarting snapd daemon and retrying..."
+        sudo systemctl restart snapd
+        sleep 3
+        sudo snap install lxd
+    fi
 fi
 
 if ! id -nG "$USER" | grep -qw "lxd"; then
