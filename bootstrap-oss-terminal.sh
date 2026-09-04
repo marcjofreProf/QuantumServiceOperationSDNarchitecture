@@ -62,8 +62,8 @@ if [ ! -S "$XDG_RUNTIME_DIR/bus" ]; then
 fi
 
 echo "[*] Verifying system dependencies..."
-# Pre-load required Charmcraft destructive-mode build dependencies
-SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel")
+# Pre-load required Charmcraft destructive-mode build dependencies & standard shadow/passwd utils
+SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd")
 
 if ! python3 -c "import ensurepip" &>/dev/null; then
     SYSTEM_DEPS+=("python3-venv")
@@ -109,7 +109,16 @@ fi
 
 if [ "$(id -gn)" != "lxd" ] && ! id -nG | grep -qw "lxd"; then
     echo "  -> Elevating LXD group session and restarting bootstrap process..."
-    exec sg lxd -c "$0 $*"
+    if ! command -v sg &>/dev/null; then
+        echo "  -> Utility 'sg' not found. Installing 'passwd' package..."
+        sudo apt-get update -yqq && sudo apt-get install -yqq passwd
+    fi
+    
+    if command -v sg &>/dev/null; then
+        exec sg lxd -c "$0 $*"
+    else
+        echo "[!] Warning: 'sg' utility unavailable. Please execute 'newgrp lxd' manually."
+    fi
 fi
 
 sudo lxd init --auto || true
