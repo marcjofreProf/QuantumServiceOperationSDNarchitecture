@@ -10,7 +10,10 @@ echo "=================================================================="
 
 # 0. WSL Systemd Verification, Runtime Directory Permissions & DBus
 if grep -qi microsoft /proc/version 2>/dev/null || [ -n "$WSL_DISTRO_NAME" ]; then
-    echo "[*] Checking WSL systemd configuration in /etc/wsl.conf..."
+    echo "[*] Checking WSL systemd configuration..."
+    
+    WSL_CONF_MODIFIED=false
+    
     if ! grep -iq "systemd=true" /etc/wsl.conf 2>/dev/null; then
         echo "[!] systemd is not enabled in /etc/wsl.conf. Auto-configuring now..."
         if ! grep -q "\[boot\]" /etc/wsl.conf 2>/dev/null; then
@@ -18,14 +21,28 @@ if grep -qi microsoft /proc/version 2>/dev/null || [ -n "$WSL_DISTRO_NAME" ]; th
         else
             sudo sed -i '/^\[boot\]/a systemd=true' /etc/wsl.conf
         fi
+        WSL_CONF_MODIFIED=true
+    fi
+
+    # Check if systemd is actively running as PID 1
+    if [ "$(ps -p 1 -o comm=)" != "systemd" ]; then
         echo "=================================================================="
-        echo "[!] CRITICAL: systemd has been enabled in /etc/wsl.conf."
-        echo "[!] You MUST restart your WSL instance/system for changes to apply."
-        echo "[!] Please run 'wsl.exe --shutdown' from PowerShell and restart."
+        if [ "$WSL_CONF_MODIFIED" = true ]; then
+            echo "[!] CRITICAL: /etc/wsl.conf has been updated to enable systemd."
+        else
+            echo "[!] CRITICAL: systemd is present in /etc/wsl.conf but NOT active."
+        fi
+        echo "[!] WSL must be fully restarted from Windows for changes to take effect."
+        echo ""
+        echo "  Please perform the following steps now:"
+        echo "    1. Close this WSL terminal."
+        echo "    2. Open Windows PowerShell or Command Prompt."
+        echo "    3. Run:  wsl.exe --shutdown"
+        echo "    4. Re-open your WSL terminal and rerun this bootstrap script."
         echo "=================================================================="
         exit 1
     else
-        echo "  -> systemd is active/enabled in /etc/wsl.conf."
+        echo "  -> systemd is active and running as PID 1."
     fi
 fi
 
