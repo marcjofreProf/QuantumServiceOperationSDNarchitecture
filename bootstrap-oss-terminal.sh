@@ -8,7 +8,27 @@ echo "=================================================================="
 echo "  Bootstrapping QuantumServiceOperationSDNarchitecture Environment"
 echo "=================================================================="
 
-# 0. Fix WSL Runtime Directory Permissions & DBus
+# 0. WSL Systemd Verification, Runtime Directory Permissions & DBus
+if grep -qi microsoft /proc/version 2>/dev/null || [ -n "$WSL_DISTRO_NAME" ]; then
+    echo "[*] Checking WSL systemd configuration in /etc/wsl.conf..."
+    if ! grep -iq "systemd=true" /etc/wsl.conf 2>/dev/null; then
+        echo "[!] systemd is not enabled in /etc/wsl.conf. Auto-configuring now..."
+        if ! grep -q "\[boot\]" /etc/wsl.conf 2>/dev/null; then
+            echo -e "\n[boot]\nsystemd=true" | sudo tee -a /etc/wsl.conf >/dev/null
+        else
+            sudo sed -i '/^\[boot\]/a systemd=true' /etc/wsl.conf
+        fi
+        echo "=================================================================="
+        echo "[!] CRITICAL: systemd has been enabled in /etc/wsl.conf."
+        echo "[!] You MUST restart your WSL instance/system for changes to apply."
+        echo "[!] Please run 'wsl.exe --shutdown' from PowerShell and restart."
+        echo "=================================================================="
+        exit 1
+    else
+        echo "  -> systemd is active/enabled in /etc/wsl.conf."
+    fi
+fi
+
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 if [ ! -d "$XDG_RUNTIME_DIR" ]; then
     sudo mkdir -p "$XDG_RUNTIME_DIR"
@@ -43,29 +63,7 @@ if [ ${#SYSTEM_DEPS[@]} -ne 0 ]; then
     sudo apt-get install -y "${SYSTEM_DEPS[@]}"
 fi
 
-# 2. Canonical Juju & Charmcraft Tooling Check / Auto-Install
-echo "[*] Verifying Canonical Juju tooling..."
-if ! command -v juju &>/dev/null; then
-    echo "[!] Juju CLI not found. Installing via snap..."
-    if command -v snap &>/dev/null; then
-        sudo snap install juju --classic --channel=3/stable
-    else
-        echo "[!] Snap package manager not found. Please install Juju manually."
-    fi
-else
-    echo "  -> Juju CLI is installed: $(juju --version | awk '{print $1}')"
-fi
-
-if ! command -v charmcraft &>/dev/null; then
-    echo "[!] Charmcraft not found. Installing via snap..."
-    if command -v snap &>/dev/null; then
-        sudo snap install charmcraft --classic
-    fi
-else
-    echo "  -> Charmcraft is installed: $(charmcraft --version | awk '{print $1}')"
-fi
-
-# 3. LXD Group Check & Persistent Session Elevation
+# 2. LXD Group Check & Persistent Session Elevation (Placed before Juju for networking)
 echo "[*] Verifying LXD environment & permissions..."
 if ! command -v lxd &>/dev/null; then
     echo "  -> LXD is missing. Installing via snap..."
@@ -131,6 +129,34 @@ for i in {1..15}; do
     echo "     [LXD API unresponsive, retrying in 2s...] ($i/15)"
     sleep 2
 done
+
+# 3. Canonical Juju & Charmcraft Tooling Check / Auto-Install
+echo "[*] Verifying Canonical Juju tooling..."
+if ! command -v juju &>/dev/null; then
+    echo "[!] Juju CLI not found. Installing via snap..."
+    if command -v snap &>/dev/null; then
+        sudo systemctl reset-failed snap.juju.fetch-oci.service 2>/dev/null || true
+        if ! sudo snap install juju --classic --channel=3/stable; then
+            echo "  -> Snap install failed. Resetting snapd service and retrying..."
+            sudo systemctl restart snapd
+            sleep 3
+            sudo snap install juju --classic --channel=3/stable
+        fi
+    else
+        echo "[!] Snap package manager not found. Please install Juju manually."
+    fi
+else
+    echo "  -> Juju CLI is installed: $(juju --version | awk '{print $1}')"
+fi
+
+if ! command -v charmcraft &>/dev/null; then
+    echo "[!] Charmcraft not found. Installing via snap..."
+    if command -v snap &>/dev/null; then
+        sudo snap install charmcraft --classic
+    fi
+else
+    echo "  -> Charmcraft is installed: $(charmcraft --version | awk '{print $1}')"
+fi
 
 # ==============================================================================
 # Purge Ghost LXD Containers and Stale Juju Certificates
