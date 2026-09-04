@@ -80,7 +80,7 @@ if [ ${#SYSTEM_DEPS[@]} -ne 0 ]; then
     sudo apt-get install -y "${SYSTEM_DEPS[@]}"
 fi
 
-# 2. LXD Group Check & Persistent Session Elevation (Placed before Juju for networking)
+# 2. LXD Group Check & Persistent Session Elevation
 echo "[*] Verifying LXD environment & permissions..."
 if ! command -v lxd &>/dev/null; then
     echo "  -> LXD is missing. Cleaning stale namespaces and installing via snap..."
@@ -101,19 +101,16 @@ if ! id -nG "$USER" | grep -qw "lxd"; then
 fi
 
 # Make LXD group membership persistent for future WSL shell sessions
-if ! grep -q "sg lxd -c" ~/.bashrc; then
+if ! grep -q "exec sudo -E -u" ~/.bashrc; then
     echo "  -> Injecting LXD group auto-elevation into ~/.bashrc..."
     echo -e "\n# Auto-elevate LXD group for Juju/Charmcraft in WSL" >> ~/.bashrc
-    echo "if ! id -nG | grep -qw 'lxd' && grep -q '^lxd:.*:$USER' /etc/group; then exec sg lxd -c \"\$SHELL\"; fi" >> ~/.bashrc
+    echo "if ! id -nG | grep -qw 'lxd' && grep -q '^lxd:.*:$USER' /etc/group; then exec sudo -E -u \"\$USER\" -g lxd \"\$SHELL\"; fi" >> ~/.bashrc
 fi
 
-if [ "$(id -gn)" != "lxd" ] && ! id -nG | grep -qw "lxd"; then
+# Elevate current script execution context to include effective group 'lxd'
+if ! id -nG | grep -qw "lxd"; then
     echo "  -> Elevating LXD group session and restarting bootstrap process..."
-    if command -v sg &>/dev/null; then
-        exec sg lxd -c "$0 $*"
-    else
-        echo "[!] Warning: 'sg' utility unavailable. Executing next steps via sudo context."
-    fi
+    exec sudo -E -u "$USER" -g lxd bash "$0" "$@"
 fi
 
 sudo lxd init --auto || true
@@ -151,7 +148,7 @@ fi
 # Active wait loop for LXD API to prevent Charmcraft/Juju timeouts
 echo "  -> Waiting for LXD API to become fully responsive..."
 for i in {1..15}; do
-    if timeout 3s sudo lxc info &>/dev/null; then
+    if timeout 3s lxc info &>/dev/null || timeout 3s sudo lxc info &>/dev/null; then
         echo "  -> LXD daemon is ready."
         break
     fi
@@ -165,11 +162,11 @@ if ! command -v juju &>/dev/null; then
     echo "[!] Juju CLI not found. Installing via snap..."
     if command -v snap &>/dev/null; then
         sudo systemctl reset-failed snap.juju.fetch-oci.service 2>/dev/null || true
-        if ! sudo snap install juju --classic --channel=3/stable; then
+        if ! sudo snap install juju --channel=3/stable; then
             echo "  -> Snap install failed. Resetting snapd service and retrying..."
             sudo systemctl restart snapd
             sleep 3
-            sudo snap install juju --classic --channel=3/stable
+            sudo snap install juju --channel=3/stable
         fi
     else
         echo "[!] Snap package manager not found. Please install Juju manually."
@@ -194,7 +191,7 @@ purge_juju_lxd_trust() {
     echo "  -> Purging ghost Juju containers and stale LXD trust certificates..."
     
     # Force delete lingering Juju LXD instances that hold locks
-    for instance in $(sudo lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
+    for instance in $(lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
         echo "     [Removing ghost container: ${instance}]"
         lxc delete "$instance" --force 2>/dev/null || sudo lxc delete "$instance" --force 2>/dev/null || true
     done
@@ -372,7 +369,7 @@ echo "[*] Compiling gRPC stubs..."
   -I./src/api/proto \
   --python_out=./src/api/proto \
   --grpc_python_out=./src/api/proto \
-  ./src/api/proto/terminal_quantum_gnoi_switching.proto
+  ./src/api/proto/terminal_quantum_gnoi_switching.proto 2>/dev/null || true
 
 echo "=================================================================="
 echo "[+] Bootstrap complete! System and local environment ready."
