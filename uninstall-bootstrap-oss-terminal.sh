@@ -8,112 +8,281 @@ echo "=================================================================="
 echo "  Uninstalling QuantumServiceOperationSDNarchitecture Environment"
 echo "=================================================================="
 
-# 1. Stop and remove persistent RESTCONF systemd service
+CONTROLLER_NAME="terminal-controller"
+CONTROLLER_VM="juju-${CONTROLLER_NAME}-0"
+VENV_DIR=".venv"
+
+# ------------------------------------------------------------------------------
+# 1. Stop and remove RESTCONF systemd service
+# ------------------------------------------------------------------------------
+
 echo "[*] Tearing down RESTCONF systemd service..."
-if systemctl list-unit-files | grep -q quantum-restconf.service; then
+
+if systemctl list-unit-files 2>/dev/null | grep -q '^quantum-restconf.service'; then
+
     sudo systemctl stop quantum-restconf.service 2>/dev/null || true
     sudo systemctl disable quantum-restconf.service 2>/dev/null || true
+
     sudo rm -f /etc/systemd/system/quantum-restconf.service
     sudo rm -f /usr/local/bin/quantum_restconf_server.py
+
     sudo systemctl daemon-reload
+
     echo "  -> Service quantum-restconf.service stopped and removed."
+
 else
     echo "  -> Service quantum-restconf.service not found. Skipping."
 fi
 
-# 2. Destroy Juju Controller and LXD VM instances
-echo "[*] Tearing down Juju controller and LXD VM instances..."
-if command -v juju &>/dev/null; then
-    juju destroy-controller terminal-controller --destroy-all-models --force --yes 2>/dev/null || true
-    juju unregister terminal-controller 2>/dev/null || true
-    
-    # Juju now bootstraps the controller as an LXD VM. Normally
-    # "destroy-controller --force" removes it, but explicitly purge any
-    # Juju-owned LXD VM/container/profile leftovers as a safety net.
-    for instance in $(lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
-        echo "  -> Removing stale Juju LXD instance: ${instance}"
-        lxc delete "$instance" --force 2>/dev/null ||             sudo lxc delete "$instance" --force 2>/dev/null || true
-    done
+# ------------------------------------------------------------------------------
+# 2. Destroy Juju controller and models
+# ------------------------------------------------------------------------------
 
-    for prof in $(lxc profile list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
-        echo "  -> Removing stale Juju LXD profile: ${prof}"
-        lxc profile delete "$prof" 2>/dev/null ||             sudo lxc profile delete "$prof" 2>/dev/null || true
-    done
+echo "[*] Tearing down Juju controller and models..."
 
-    # Scrub LXD trust and local Juju credentials/caches to ensure a clean
-    # slate for the next bootstrap.
-    sudo lxc config trust rm juju 2>/dev/null || true
-    lxc config trust rm juju 2>/dev/null || true
-    rm -rf ~/.local/share/juju ~/.config/juju
+if command -v juju >/dev/null 2>&1; then
 
-    echo "  -> Juju controller 'terminal-controller' and Juju-owned LXD resources removed."
+    if juju controllers 2>/dev/null | grep -q "$CONTROLLER_NAME"; then
+
+        echo "  -> Destroying Juju controller '$CONTROLLER_NAME'..."
+
+        juju destroy-controller "$CONTROLLER_NAME" \
+            --destroy-all-models \
+            --force \
+            --yes 2>/dev/null || true
+
+        juju unregister "$CONTROLLER_NAME" 2>/dev/null || true
+
+        echo "  -> Juju controller destroyed."
+
+    else
+        echo "  -> Juju controller '$CONTROLLER_NAME' not registered."
+    fi
+
 else
-    echo "  -> Juju CLI not found. Skipping controller teardown."
+    echo "  -> Juju not installed. Skipping Juju cleanup."
 fi
 
-# 3. Remove bootstrap-added LXD group/session customization
-echo "[*] Removing bootstrap-added LXD group/session customization..."
+# ------------------------------------------------------------------------------
+# 3. Remove persistent Juju controller VM
+#
+# The bootstrap configures the controller VM with:
+#
+#     boot.autostart=true
+#
+# Explicitly remove it during uninstall.
+# ------------------------------------------------------------------------------
 
-# The bootstrap adds an auto-elevation snippet to ~/.bashrc so new shells
-# acquire the lxd supplementary group. Remove only the exact lines it added.
-sed -i '/^# Auto-elevate LXD group for Juju\/Charmcraft in WSL$/d' ~/.bashrc 2>/dev/null || true
-sed -i '/^if ! id -nG | grep -qw '\''lxd'\'' && grep -q '\''^lxd:.*:$USER'\'' \/etc\/group; then exec sudo -E -u "\$USER" -g lxd "\$SHELL"; fi$/d' ~/.bashrc 2>/dev/null || true
+echo "[*] Removing Juju controller LXD VM..."
 
-# Remove the user from the lxd group when possible. This does not remove
-# LXD itself, because the host may use LXD independently of this project.
-if getent group lxd >/dev/null 2>&1 && id -nG "$USER" | grep -qw "lxd"; then
+if sudo lxc info "$CONTROLLER_VM" >/dev/null 2>&1; then
+
+    echo "  -> Found controller VM: $CONTROLLER_VM"
+
+    sudo lxc config set "$CONTROLLER_VM" \
+        boot.autostart false 2>/dev/null || true
+
+    sudo lxc stop "$CONTROLLER_VM" \
+        --force 2>/dev/null || true
+
+    sudo lxc delete "$CONTROLLER_VM" \
+        --force 2>/dev/null || true
+
+    echo "  -> Controller VM removed."
+
+else
+    echo "  -> Controller VM '$CONTROLLER_VM' not found. Skipping."
+fi
+
+# ------------------------------------------------------------------------------
+# 4. Remove Juju-generated LXD profile
+# ------------------------------------------------------------------------------
+
+echo "[*] Removing Juju LXD profile..."
+
+CONTROLLER_PROFILE="juju-${CONTROLLER_NAME}"
+
+if sudo lxc profile show "$CONTROLLER_PROFILE" >/dev/null 2>&1; then
+
+    sudo lxc profile delete "$CONTROLLER_PROFILE" 2>/dev/null || true
+
+    echo "  -> Removed LXD profile '$CONTROLLER_PROFILE'."
+
+else
+    echo "  -> LXD profile '$CONTROLLER_PROFILE' not found. Skipping."
+fi
+
+# ------------------------------------------------------------------------------
+# 5. Remove Juju LXD trust
+# ------------------------------------------------------------------------------
+
+echo "[*] Removing Juju LXD trust..."
+
+sudo lxc config trust remove juju 2>/dev/null || true
+lxc config trust remove juju 2>/dev/null || true
+
+# ------------------------------------------------------------------------------
+# 6. Remove local Juju state
+# ------------------------------------------------------------------------------
+
+echo "[*] Removing local Juju state..."
+
+rm -rf ~/.local/share/juju
+rm -rf ~/.config/juju
+
+echo "  -> Local Juju state removed."
+
+# ------------------------------------------------------------------------------
+# 7. Remove LXD group/session customization
+# ------------------------------------------------------------------------------
+
+echo "[*] Removing LXD group/session customization..."
+
+sed -i \
+    '/^# Auto-elevate LXD group for Juju\/Charmcraft in WSL$/d' \
+    ~/.bashrc 2>/dev/null || true
+
+sed -i \
+    '/^if ! id -nG | grep -qw '\''lxd'\'' && grep -q '\''^lxd:.*:$USER'\'' \/etc\/group; then exec sudo -E -u "\$USER" -g lxd "\$SHELL"; fi$/d' \
+    ~/.bashrc 2>/dev/null || true
+
+if getent group lxd >/dev/null 2>&1 &&
+   id -nG "$USER" | grep -qw "lxd"; then
+
     sudo gpasswd -d "$USER" lxd 2>/dev/null || true
+
     echo "  -> Removed $USER from the lxd group."
+
+else
+    echo "  -> $USER is not a member of the lxd group."
 fi
 
-# 5. Clean kernel network and sysctl configurations
-echo "[*] Reverting custom sysctl and network module configurations..."
+# ------------------------------------------------------------------------------
+# 8. Remove custom sysctl/module configuration
+# ------------------------------------------------------------------------------
+
+echo "[*] Reverting custom sysctl and network module configuration..."
+
 sudo rm -f /etc/sysctl.d/99-sdn-uonos.conf
 sudo rm -f /etc/modules-load.d/sdn-uonos.conf
-echo "  -> Removed sysctl and modules auto-load configs."
 
-# 4. Remove isolated virtual environment
-VENV_DIR=".venv"
+sudo sysctl --system >/dev/null 2>&1 || true
+
+echo "  -> Custom system configuration removed."
+
+# ------------------------------------------------------------------------------
+# 9. Remove Python virtual environment
+# ------------------------------------------------------------------------------
+
 if [ -d "$VENV_DIR" ]; then
-    echo "[*] Removing Python virtual environment (${VENV_DIR})..."
+
+    echo "[*] Removing Python virtual environment..."
+
     rm -rf "$VENV_DIR"
-    echo "  -> Removed ${VENV_DIR}/"
+
+    echo "  -> Removed $VENV_DIR/"
+
 else
-    echo "[*] Virtual environment (${VENV_DIR}) not found. Skipping."
+    echo "[*] Python virtual environment not found. Skipping."
 fi
 
-# 5. Clean generated gRPC / Protobuf stubs and mock scripts
-for STUB_DIR in "src/api/proto" "src/api/grpc" "proto" "hardware-agents/restconf-servers" "hardware-agents/gnoi-targets"; do
+# ------------------------------------------------------------------------------
+# 10. Clean generated gRPC / Protobuf files
+# ------------------------------------------------------------------------------
+
+for STUB_DIR in \
+    "src/api/proto" \
+    "src/api/grpc" \
+    "proto" \
+    "hardware-agents/restconf-servers" \
+    "hardware-agents/gnoi-targets"
+do
+
     if [ -d "$STUB_DIR" ]; then
-        echo "[*] Removing generated stubs and mock servers in ${STUB_DIR}..."
-        find "$STUB_DIR" -type f \( -name "*_pb2.py" -o -name "*_pb2_grpc.py" -o -name "mock_*.py" \) -delete
-        echo "  -> Cleaned ${STUB_DIR}/"
+
+        echo "[*] Cleaning generated files in $STUB_DIR..."
+
+        find "$STUB_DIR" \
+            -type f \
+            \( \
+                -name "*_pb2.py" \
+                -o -name "*_pb2_grpc.py" \
+                -o -name "mock_*.py" \
+            \) \
+            -delete
+
     fi
+
 done
 
-# 6. Clean compiled YANG tree files
+# ------------------------------------------------------------------------------
+# 11. Clean compiled YANG tree files
+# ------------------------------------------------------------------------------
+
 YANG_DIR="src/api/yang"
+
 if [ -d "$YANG_DIR" ]; then
+
     echo "[*] Removing compiled YANG tree files..."
-    find "$YANG_DIR" -type f -name "*.tree" -delete
-    echo "  -> Cleaned ${YANG_DIR}/"
+
+    find "$YANG_DIR" \
+        -type f \
+        -name "*.tree" \
+        -delete
+
 fi
 
-# 7. Clean Canonical Juju and Charmcraft build artifacts
-echo "[*] Removing local Charmcraft and Juju build artifacts..."
-rm -rf .charmcraft/ charm/.charmcraft/ charm/build/ *.charm charm/*.charm
+# ------------------------------------------------------------------------------
+# 12. Clean Charmcraft/Juju build artifacts
+# ------------------------------------------------------------------------------
 
-# 8. Clean Python cache files recursively
-echo "[*] Removing Python cache directories and bytecode..."
-find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-find . -type f -name "*.py[cod]" -delete 2>/dev/null || true
+echo "[*] Removing Charmcraft/Juju build artifacts..."
 
-# 9. Revoke Execution Permissions from scripts and tests
-echo "[*] Removing execution permissions from scripts and tests..."
-chmod -x scripts/*.py 2>/dev/null || true
-chmod -x scripts/*.sh 2>/dev/null || true
-chmod -x tests/*.sh 2>/dev/null || true
+rm -rf .charmcraft/
+rm -rf charm/.charmcraft/
+rm -rf charm/build/
+
+rm -f *.charm
+rm -f charm/*.charm
+
+# ------------------------------------------------------------------------------
+# 13. Clean Python cache files
+# ------------------------------------------------------------------------------
+
+echo "[*] Removing Python cache files..."
+
+find . \
+    -type d \
+    -name "__pycache__" \
+    -exec rm -rf {} + \
+    2>/dev/null || true
+
+find . \
+    -type f \
+    -name "*.py[cod]" \
+    -delete \
+    2>/dev/null || true
+
+# ------------------------------------------------------------------------------
+# 14. Final verification
+# ------------------------------------------------------------------------------
+
+echo "[*] Verifying Juju controller removal..."
+
+if sudo lxc info "$CONTROLLER_VM" >/dev/null 2>&1; then
+    echo "[!] WARNING: Controller VM still exists: $CONTROLLER_VM"
+else
+    echo "  -> Controller VM removed."
+fi
+
+if sudo lxc profile show "$CONTROLLER_PROFILE" >/dev/null 2>&1; then
+    echo "[!] WARNING: Controller profile still exists: $CONTROLLER_PROFILE"
+else
+    echo "  -> Controller profile removed."
+fi
 
 echo "=================================================================="
-echo "[+] Uninstall complete! Local workspace and infrastructure returned to clean state."
+echo "[+] Uninstall complete!"
+echo "[+] Juju controller and its LXD resources removed."
+echo "[+] LXD itself was NOT removed."
 echo "=================================================================="
