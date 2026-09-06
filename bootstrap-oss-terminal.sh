@@ -123,6 +123,7 @@ if ! id -nG | grep -qw "lxd"; then
 fi
 
 sudo lxd init --auto || true
+sudo lxc profile set default security.nesting true 2>/dev/null || true
 
 # Auto-fix IPv6 routing issues conditionally to avoid unnecessary daemon restarts
 echo "  -> Checking LXD bridge network (lxdbr0) configuration..."
@@ -198,6 +199,8 @@ fi
 # ==============================================================================
 purge_juju_lxd_trust() {
     echo "  -> Purging ghost Juju containers and stale LXD trust certificates..."
+    sudo umount -l /run/snapd/ns/*.mnt 2>/dev/null || true
+    sudo rm -f /run/snapd/ns/*.mnt 2>/dev/null || true
     
     # Force delete lingering Juju LXD instances that hold locks
     for instance in $(lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
