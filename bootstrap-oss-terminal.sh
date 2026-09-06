@@ -83,20 +83,21 @@ fi
 # 2. LXD Group Check & Persistent Session Elevation
 echo "[*] Verifying LXD environment & permissions..."
 
-# Enforce shared mount propagation for snapd namespace creation in WSL2
+# Enforce shared mount propagation on root and /run for snapd namespace handling in WSL2
 sudo mount --make-rshared / 2>/dev/null || true
+sudo mount --make-rshared /run 2>/dev/null || true
 
 if ! command -v lxd &>/dev/null; then
     echo "  -> LXD is missing. Cleaning stale namespaces and installing via snap..."
-    sudo umount -l /run/snapd/ns/lxd.mnt 2>/dev/null || true
-    sudo rm -f /run/snapd/ns/lxd.mnt 2>/dev/null || true
+    sudo umount -l /run/snapd/ns/*.mnt 2>/dev/null || true
+    sudo rm -f /run/snapd/ns/*.mnt 2>/dev/null || true
     sudo snap discard-ns lxd 2>/dev/null || true
     sudo systemctl reset-failed snap.lxd.daemon.service 2>/dev/null || true
     
     if ! sudo snap install lxd; then
         echo "  -> LXD snap install failed. Cleaning mount namespaces, restarting snapd daemon and retrying..."
-        sudo umount -l /run/snapd/ns/lxd.mnt 2>/dev/null || true
-        sudo rm -f /run/snapd/ns/lxd.mnt 2>/dev/null || true
+        sudo umount -l /run/snapd/ns/*.mnt 2>/dev/null || true
+        sudo rm -f /run/snapd/ns/*.mnt 2>/dev/null || true
         sudo snap discard-ns lxd 2>/dev/null || true
         sudo systemctl restart snapd
         sleep 3
@@ -123,9 +124,12 @@ if ! id -nG | grep -qw "lxd"; then
 fi
 
 sudo lxd init --auto || true
+
+# Configure LXD default profile for nested snap operations (required for Juju controllers in WSL2)
 sudo lxc profile set default security.nesting true 2>/dev/null || true
 sudo lxc profile set default security.privileged true 2>/dev/null || true
-sudo mount --make-rshared /
+sudo mount --make-rshared / 2>/dev/null || true
+sudo mount --make-rshared /run 2>/dev/null || true
 
 # Auto-fix IPv6 routing issues conditionally to avoid unnecessary daemon restarts
 echo "  -> Checking LXD bridge network (lxdbr0) configuration..."
