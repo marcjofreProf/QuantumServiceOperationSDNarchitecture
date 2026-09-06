@@ -83,7 +83,7 @@ fi
 # 2. LXD Group Check & Persistent Session Elevation
 echo "[*] Verifying LXD environment & permissions..."
 
-# Enforce shared mount propagation for snapd namespace creation in WSL2
+# Enforce shared mount propagation on root and /run for snapd namespace creation in WSL2
 sudo mount --make-rshared / 2>/dev/null || true
 sudo mount --make-rshared /run 2>/dev/null || true
 
@@ -124,6 +124,8 @@ if ! id -nG | grep -qw "lxd"; then
 fi
 
 sudo lxd init --auto || true
+
+# Configure LXD default profile for nested snap operations (required for Juju controllers in WSL2)
 sudo lxc profile set default security.nesting true 2>/dev/null || true
 sudo lxc profile set default security.privileged true 2>/dev/null || true
 sudo mount --make-rshared / 2>/dev/null || true
