@@ -127,6 +127,12 @@ fi
 
 sudo lxd init --auto || true
 
+# Ensure the LXD snap daemon is enabled and running. This is important after a
+# host/VM reboot: LXD must come back before its VMs can be auto-started.
+echo "  -> Ensuring LXD daemon is enabled at boot..."
+sudo systemctl enable --now snap.lxd.daemon.service 2>/dev/null || true
+sudo systemctl enable --now snap.lxd.daemon.unix.socket 2>/dev/null || true
+
 # The Juju controller itself will run in an LXD VM, so no nested-container
 # profile changes are required here. Leave the LXD default profile intact.
 
@@ -290,41 +296,97 @@ if [ "$VM_TEST_OK" != true ]; then
     exit 1
 fi
 
-if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
-    echo "  -> Found local registration for '$CONTROLLER_NAME'. Testing API connection..."
-    CONTROLLER_REACHABLE=false
-    
-    for i in {1..5}; do
+# IMPORTANT: A controller can be temporarily unreachable immediately after a
+# host/WSL reboot while LXD, networking, cloud-init, and the controller VM are
+# still starting. Never destroy/re-bootstrap a controller merely because its
+# API is temporarily unavailable. First locate and start the persistent VM.
+
+JUJU_CONTROLLER_VM=""
+find_juju_controller_vm() {
+    # Juju normally names the controller machine using the controller name.
+    # Prefer the exact expected name so an application VM is never mistaken
+    # for the controller VM. Fall back to a Juju machine only if necessary.
+    local expected="juju-${CONTROLLER_NAME}-0"
+
+    if sudo lxc info "$expected" >/dev/null 2>&1; then
+        JUJU_CONTROLLER_VM="$expected"
+    else
+        JUJU_CONTROLLER_VM="$(sudo lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' | head -n1 || true)"
+    fi
+}
+
+wait_for_juju_controller() {
+    local attempts="${1:-30}"
+    local i
+    for i in $(seq 1 "$attempts"); do
         if timeout 5s juju switch "$CONTROLLER_NAME" &>/dev/null; then
-            CONTROLLER_REACHABLE=true
-            echo "  -> Juju controller '$CONTROLLER_NAME' is active and reachable."
-            break
+            return 0
         fi
-        echo "     [Waiting for controller API to respond... ($i/5)]"
+        echo "     [Waiting for Juju controller API... ($i/$attempts)]"
         sleep 2
     done
+    return 1
+}
 
-    if [ "$CONTROLLER_REACHABLE" = false ]; then
-        echo "[!] '$CONTROLLER_NAME' API unreachable. Force purging stale controller and LXD trust certificates..."
-        juju kill-controller "$CONTROLLER_NAME" --yes --force 2>/dev/null || true
-        juju unregister "$CONTROLLER_NAME" 2>/dev/null || true
-        
-        purge_juju_lxd_trust
-        
-        echo "[!] Re-bootstrapping local controller..."
-        juju bootstrap --bootstrap-base="$JUJU_BOOTSTRAP_BASE" --bootstrap-constraints="$JUJU_BOOTSTRAP_CONSTRAINTS" localhost "$CONTROLLER_NAME" || {
-            echo "[!] Failed to bootstrap Juju controller."
-            exit 1
-        }
+if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
+    echo "  -> Found local registration for '$CONTROLLER_NAME'."
+
+    find_juju_controller_vm
+    if [ -n "$JUJU_CONTROLLER_VM" ]; then
+        echo "  -> Controller VM: $JUJU_CONTROLLER_VM"
+
+        VM_STATE="$(sudo lxc list "$JUJU_CONTROLLER_VM" --format csv -c s 2>/dev/null || true)"
+        if [ "$VM_STATE" != "RUNNING" ]; then
+            echo "  -> Controller VM is '$VM_STATE'; starting it..."
+            sudo lxc start "$JUJU_CONTROLLER_VM" || {
+                echo "[!] Failed to start controller VM '$JUJU_CONTROLLER_VM'."
+                exit 1
+            }
+        fi
+
+        # Make automatic startup explicit and persistent.
+        sudo lxc config set "$JUJU_CONTROLLER_VM" boot.autostart true
+    else
+        echo "  -> No Juju controller VM found yet; waiting for LXD to settle..."
+    fi
+
+    if wait_for_juju_controller 30; then
+        echo "  -> Juju controller '$CONTROLLER_NAME' is active and reachable."
+    else
+        echo "[!] Juju controller '$CONTROLLER_NAME' is still unreachable after waiting."
+        echo "    The existing controller has NOT been deleted or re-bootstrapped."
+        echo "    Check with: sudo lxc list"
+        echo "              juju status"
+        echo "              juju debug-log"
+        exit 1
     fi
 else
-    echo "[!] '$CONTROLLER_NAME' not registered. Ensuring clean trust state before bootstrap..."
+    echo "[!] '$CONTROLLER_NAME' is not registered locally."
+
+    # Only purge known stale Juju instances when there is no controller
+    # registration at all. This protects a valid persistent controller from
+    # being destroyed after a power cycle.
+    echo "  -> No registered controller found; ensuring clean trust state..."
     purge_juju_lxd_trust
-    
+
+    echo "  -> Bootstrapping local controller..."
     juju bootstrap --bootstrap-base="$JUJU_BOOTSTRAP_BASE" --bootstrap-constraints="$JUJU_BOOTSTRAP_CONSTRAINTS" localhost "$CONTROLLER_NAME" || {
         echo "[!] Failed to bootstrap Juju controller."
         exit 1
     }
+fi
+
+# Explicitly configure the controller VM for automatic startup after a host
+# reboot/power cycle. LXD will start it when the LXD daemon comes back.
+find_juju_controller_vm
+if [ -n "$JUJU_CONTROLLER_VM" ]; then
+    echo "[*] Configuring persistent automatic startup for $JUJU_CONTROLLER_VM..."
+    sudo lxc config set "$JUJU_CONTROLLER_VM" boot.autostart true
+    sudo lxc config set "$JUJU_CONTROLLER_VM" boot.autostart.delay 5
+    echo "  -> boot.autostart: $(sudo lxc config get "$JUJU_CONTROLLER_VM" boot.autostart)"
+    echo "  -> boot.autostart.delay: $(sudo lxc config get "$JUJU_CONTROLLER_VM" boot.autostart.delay)"
+else
+    echo "[!] WARNING: Could not identify the Juju controller VM."
 fi
 
 # Check for and switch to the target model
@@ -426,6 +488,35 @@ echo "[*] Compiling gRPC stubs..."
   --python_out=./src/api/proto \
   --grpc_python_out=./src/api/proto \
   ./src/api/proto/terminal_quantum_gnoi_switching.proto 2>/dev/null || true
+
+# =============================================================================
+# 11. Final Persistence / Reboot Safety Verification
+# =============================================================================
+echo "[*] Verifying reboot/power-cycle persistence..."
+
+# LXD itself must start with the host.
+LXD_BOOT_ENABLED=false
+if systemctl is-enabled snap.lxd.daemon.service >/dev/null 2>&1; then
+    LXD_BOOT_ENABLED=true
+fi
+
+find_juju_controller_vm
+
+if [ -n "$JUJU_CONTROLLER_VM" ]; then
+    AUTOSTART="$(sudo lxc config get "$JUJU_CONTROLLER_VM" boot.autostart 2>/dev/null || true)"
+    VM_STATE="$(sudo lxc list "$JUJU_CONTROLLER_VM" --format csv -c s 2>/dev/null || true)"
+
+    echo "  -> LXD daemon enabled at boot: $LXD_BOOT_ENABLED"
+    echo "  -> Juju controller VM: $JUJU_CONTROLLER_VM"
+    echo "  -> Controller VM state: $VM_STATE"
+    echo "  -> Controller VM boot.autostart: $AUTOSTART"
+
+    if [ "$AUTOSTART" != "true" ]; then
+        echo "[!] WARNING: Controller VM automatic startup is not enabled."
+    fi
+else
+    echo "[!] WARNING: Juju controller VM could not be found during final verification."
+fi
 
 echo "=================================================================="
 echo "[+] Bootstrap complete! System and local environment ready."
