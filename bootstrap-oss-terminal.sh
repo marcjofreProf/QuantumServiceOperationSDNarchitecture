@@ -82,6 +82,10 @@ fi
 
 # 2. LXD Group Check & Persistent Session Elevation
 echo "[*] Verifying LXD environment & permissions..."
+
+# Enforce shared mount propagation for snapd namespace creation in WSL2
+sudo mount --make-rshared / 2>/dev/null || true
+
 if ! command -v lxd &>/dev/null; then
     echo "  -> LXD is missing. Cleaning stale namespaces and installing via snap..."
     sudo umount -l /run/snapd/ns/lxd.mnt 2>/dev/null || true
