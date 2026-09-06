@@ -188,7 +188,6 @@ if ! command -v juju &>/dev/null; then
 
     sudo systemctl restart snapd
     sleep 3
-    sudo snap install juju-db --channel=4.4.30/stable
     
     if ! sudo snap install juju --channel=3/stable; then
         echo "[!] Failed to install Juju via snap."
