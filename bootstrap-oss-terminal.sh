@@ -180,7 +180,7 @@ echo "[*] Verifying Canonical Juju tooling..."
 
 if ! command -v juju &>/dev/null; then
     echo "[!] Juju CLI not found. Installing via snap..."
-
+    
     if ! command -v snap &>/dev/null; then
         echo "[!] Snap package manager not found."
         exit 1
@@ -188,7 +188,8 @@ if ! command -v juju &>/dev/null; then
 
     sudo systemctl restart snapd
     sleep 3
-
+    sudo snap install juju-db --channel=4.4.30/stable
+    
     if ! sudo snap install juju --channel=3/stable; then
         echo "[!] Failed to install Juju via snap."
         exit 1
