@@ -182,55 +182,27 @@ if ! command -v juju &>/dev/null; then
     echo "[!] Juju CLI not found. Installing via snap..."
 
     if ! command -v snap &>/dev/null; then
-        echo "[!] Snap package manager not found. Please install snapd first."
+        echo "[!] Snap package manager not found."
         exit 1
     fi
 
-    # Make sure snapd is running
-    sudo systemctl reset-failed snapd.service 2>/dev/null || true
     sudo systemctl restart snapd
     sleep 3
 
-    # Install Juju
     if ! sudo snap install juju --channel=3/stable; then
         echo "[!] Failed to install Juju via snap."
-        echo "[!] This may indicate a snapd/mount-namespace problem."
         exit 1
     fi
-
-    echo "  -> Juju installed: $(juju --version | awk '{print $1}')"
-
-else
-    echo "  -> Juju CLI is installed: $(juju --version | awk '{print $1}')"
 fi
 
-# ------------------------------------------------------------------
-# Verify that Juju's MongoDB snap can be installed.
-# Juju bootstrap will need this snap for the controller database.
-# ------------------------------------------------------------------
-echo "[*] Verifying Juju MongoDB (juju-db) snap..."
+echo "  -> Juju CLI: $(juju --version | awk '{print $1}')"
 
+# Verify juju-db is available before bootstrap
 if sudo snap list juju-db &>/dev/null; then
-    echo "  -> juju-db is already installed."
+    echo "  -> juju-db is installed."
 else
     echo "  -> juju-db is not installed. Installing..."
-
-    if ! sudo snap install juju-db --channel=4.4.30/stable; then
-        echo ""
-        echo "=================================================================="
-        echo "[!] ERROR: Failed to install juju-db."
-        echo "[!] Juju cannot bootstrap the controller until this is fixed."
-        echo ""
-        echo "    If this is WSL2, restart WSL from Windows:"
-        echo ""
-        echo "        wsl.exe --shutdown"
-        echo ""
-        echo "    Then reopen Ubuntu and rerun this script."
-        echo "=================================================================="
-        exit 1
-    fi
-
-    echo "  -> juju-db installed successfully."
+    sudo snap install juju-db --channel=4.4.30/stable
 fi
 
 if ! command -v charmcraft &>/dev/null; then
