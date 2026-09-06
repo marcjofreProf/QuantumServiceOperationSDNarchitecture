@@ -124,6 +124,8 @@ fi
 
 sudo lxd init --auto || true
 sudo lxc profile set default security.nesting true 2>/dev/null || true
+sudo lxc profile set default security.privileged true 2>/dev/null || true
+sudo mount --make-rshared /
 
 # Auto-fix IPv6 routing issues conditionally to avoid unnecessary daemon restarts
 echo "  -> Checking LXD bridge network (lxdbr0) configuration..."
