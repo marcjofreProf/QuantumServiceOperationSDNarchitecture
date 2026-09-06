@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bootstrap-oss-terminal.sh
+# ./bootstrap-oss-terminal.sh
 # Environment setup for QuantumServiceOperationSDNarchitecture
 
 set -eo pipefail
