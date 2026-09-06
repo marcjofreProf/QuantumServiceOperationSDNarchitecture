@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# uninstall-bootstrap-oss-terminal.sh
+# ./uninstall-bootstrap-oss-terminal.sh
 # Reverses the environment setup for QuantumServiceOperationSDNarchitecture
 
 set -eo pipefail
@@ -21,22 +21,52 @@ else
     echo "  -> Service quantum-restconf.service not found. Skipping."
 fi
 
-# 2. Destroy Juju Controller and Models
-echo "[*] Tearing down Juju controller and LXD containers..."
+# 2. Destroy Juju Controller and LXD VM instances
+echo "[*] Tearing down Juju controller and LXD VM instances..."
 if command -v juju &>/dev/null; then
     juju destroy-controller terminal-controller --destroy-all-models --force --yes 2>/dev/null || true
     juju unregister terminal-controller 2>/dev/null || true
     
-    # Scrub LXD trust and local credentials to ensure clean slate for future bootstraps
+    # Juju now bootstraps the controller as an LXD VM. Normally
+    # "destroy-controller --force" removes it, but explicitly purge any
+    # Juju-owned LXD VM/container/profile leftovers as a safety net.
+    for instance in $(lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
+        echo "  -> Removing stale Juju LXD instance: ${instance}"
+        lxc delete "$instance" --force 2>/dev/null ||             sudo lxc delete "$instance" --force 2>/dev/null || true
+    done
+
+    for prof in $(lxc profile list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
+        echo "  -> Removing stale Juju LXD profile: ${prof}"
+        lxc profile delete "$prof" 2>/dev/null ||             sudo lxc profile delete "$prof" 2>/dev/null || true
+    done
+
+    # Scrub LXD trust and local Juju credentials/caches to ensure a clean
+    # slate for the next bootstrap.
     sudo lxc config trust rm juju 2>/dev/null || true
     lxc config trust rm juju 2>/dev/null || true
-    rm -rf ~/.local/share/juju
-    echo "  -> Juju controller 'terminal-controller' destroyed."
+    rm -rf ~/.local/share/juju ~/.config/juju
+
+    echo "  -> Juju controller 'terminal-controller' and Juju-owned LXD resources removed."
 else
     echo "  -> Juju CLI not found. Skipping controller teardown."
 fi
 
-# 3. Clean kernel network and sysctl configurations
+# 3. Remove bootstrap-added LXD group/session customization
+echo "[*] Removing bootstrap-added LXD group/session customization..."
+
+# The bootstrap adds an auto-elevation snippet to ~/.bashrc so new shells
+# acquire the lxd supplementary group. Remove only the exact lines it added.
+sed -i '/^# Auto-elevate LXD group for Juju\/Charmcraft in WSL$/d' ~/.bashrc 2>/dev/null || true
+sed -i '/^if ! id -nG | grep -qw '\''lxd'\'' && grep -q '\''^lxd:.*:$USER'\'' \/etc\/group; then exec sudo -E -u "\$USER" -g lxd "\$SHELL"; fi$/d' ~/.bashrc 2>/dev/null || true
+
+# Remove the user from the lxd group when possible. This does not remove
+# LXD itself, because the host may use LXD independently of this project.
+if getent group lxd >/dev/null 2>&1 && id -nG "$USER" | grep -qw "lxd"; then
+    sudo gpasswd -d "$USER" lxd 2>/dev/null || true
+    echo "  -> Removed $USER from the lxd group."
+fi
+
+# 5. Clean kernel network and sysctl configurations
 echo "[*] Reverting custom sysctl and network module configurations..."
 sudo rm -f /etc/sysctl.d/99-sdn-uonos.conf
 sudo rm -f /etc/modules-load.d/sdn-uonos.conf
