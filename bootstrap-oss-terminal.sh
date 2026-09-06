@@ -84,11 +84,16 @@ fi
 echo "[*] Verifying LXD environment & permissions..."
 if ! command -v lxd &>/dev/null; then
     echo "  -> LXD is missing. Cleaning stale namespaces and installing via snap..."
+    sudo umount -l /run/snapd/ns/lxd.mnt 2>/dev/null || true
+    sudo rm -f /run/snapd/ns/lxd.mnt 2>/dev/null || true
     sudo snap discard-ns lxd 2>/dev/null || true
     sudo systemctl reset-failed snap.lxd.daemon.service 2>/dev/null || true
     
     if ! sudo snap install lxd; then
-        echo "  -> LXD snap install failed. Restarting snapd daemon and retrying..."
+        echo "  -> LXD snap install failed. Cleaning mount namespaces, restarting snapd daemon and retrying..."
+        sudo umount -l /run/snapd/ns/lxd.mnt 2>/dev/null || true
+        sudo rm -f /run/snapd/ns/lxd.mnt 2>/dev/null || true
+        sudo snap discard-ns lxd 2>/dev/null || true
         sudo systemctl restart snapd
         sleep 3
         sudo snap install lxd
