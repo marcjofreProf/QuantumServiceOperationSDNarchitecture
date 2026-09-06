@@ -86,9 +86,10 @@ sudo systemctl enable --now apparmor 2>/dev/null || true
 # 2. LXD Group Check & Persistent Session Elevation
 echo "[*] Verifying LXD environment & permissions..."
 
-# Enforce shared mount propagation for snapd namespace creation in WSL2
-sudo mount --make-rshared / 2>/dev/null || true
-sudo mount --make-rshared /run 2>/dev/null || true
+# Juju controller is bootstrapped as an LXD virtual machine.
+# Do not configure LXD's default profile as privileged/unconfined or force
+# recursive mount propagation: those workarounds are for nested system
+# containers and are unnecessary for an LXD VM controller.
 
 if ! command -v lxd &>/dev/null; then
     echo "  -> LXD is missing. Cleaning stale namespaces and installing via snap..."
@@ -126,13 +127,8 @@ fi
 
 sudo lxd init --auto || true
 
-# Configure LXD default profile for unconfined nesting (required for snapd inside LXD in WSL2)
-sudo lxc profile set default security.nesting true 2>/dev/null || true
-sudo lxc profile set default security.privileged true 2>/dev/null || true
-sudo lxc profile set default raw.lxc "lxc.apparmor.profile=unconfined" 2>/dev/null || true
-sudo lxc profile set default security.syscalls.intercept.mknod true 2>/dev/null || true
-sudo mount --make-rshared / 2>/dev/null || true
-sudo mount --make-rshared /run 2>/dev/null || true
+# The Juju controller itself will run in an LXD VM, so no nested-container
+# profile changes are required here. Leave the LXD default profile intact.
 
 # Auto-fix IPv6 routing issues conditionally to avoid unnecessary daemon restarts
 echo "  -> Checking LXD bridge network (lxdbr0) configuration..."
@@ -196,14 +192,6 @@ if ! command -v juju &>/dev/null; then
 fi
 
 echo "  -> Juju CLI: $(juju --version | awk '{print $1}')"
-
-# Verify juju-db is available before bootstrap
-if sudo snap list juju-db &>/dev/null; then
-    echo "  -> juju-db is installed."
-else
-    echo "  -> juju-db is not installed. Installing..."
-    sudo snap install juju-db --channel=4.4.30/stable
-fi
 
 if ! command -v charmcraft &>/dev/null; then
     echo "[!] Charmcraft not found. Installing via snap..."
@@ -270,6 +258,38 @@ EOF
 echo "[*] Verifying Juju Controller..."
 CONTROLLER_NAME="terminal-controller"
 
+# Run the Juju controller itself as an LXD VM rather than an LXD system
+# container. This avoids snapd mount-namespace issues inside nested LXD
+# containers (e.g. juju-db installation failures).
+JUJU_BOOTSTRAP_CONSTRAINTS="cores=2 mem=4G root-disk=20G virt-type=virtual-machine"
+JUJU_BOOTSTRAP_BASE="ubuntu@24.04"
+
+echo "  -> Juju controller bootstrap mode: LXD virtual machine"
+echo "  -> Bootstrap constraints: ${JUJU_BOOTSTRAP_CONSTRAINTS}"
+
+# Verify that the LXD backend can create VMs before asking Juju to bootstrap.
+# This catches missing / unsupported KVM virtualization early and produces a
+# useful error instead of failing much later during Juju provisioning.
+if ! sudo lxc info >/dev/null 2>&1; then
+    echo "[!] LXD API is not available."
+    exit 1
+fi
+
+LXD_VM_TEST="bootstrap-vm-test-$$"
+VM_TEST_OK=false
+if sudo lxc launch ubuntu:24.04 "$LXD_VM_TEST" --vm >/dev/null 2>&1; then
+    VM_TEST_OK=true
+    sudo lxc delete "$LXD_VM_TEST" --force >/dev/null 2>&1 || true
+fi
+
+if [ "$VM_TEST_OK" != true ]; then
+    echo "[!] LXD VM creation test failed."
+    echo "    The Juju controller is configured to run as an LXD VM."
+    echo "    Verify that the host supports nested hardware virtualization/KVM."
+    echo "    On WSL2, ensure nested virtualization is available to the WSL kernel."
+    exit 1
+fi
+
 if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
     echo "  -> Found local registration for '$CONTROLLER_NAME'. Testing API connection..."
     CONTROLLER_REACHABLE=false
@@ -292,7 +312,7 @@ if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
         purge_juju_lxd_trust
         
         echo "[!] Re-bootstrapping local controller..."
-        juju bootstrap localhost "$CONTROLLER_NAME" || {
+        juju bootstrap --bootstrap-base="$JUJU_BOOTSTRAP_BASE" --bootstrap-constraints="$JUJU_BOOTSTRAP_CONSTRAINTS" localhost "$CONTROLLER_NAME" || {
             echo "[!] Failed to bootstrap Juju controller."
             exit 1
         }
@@ -301,7 +321,7 @@ else
     echo "[!] '$CONTROLLER_NAME' not registered. Ensuring clean trust state before bootstrap..."
     purge_juju_lxd_trust
     
-    juju bootstrap localhost "$CONTROLLER_NAME" || {
+    juju bootstrap --bootstrap-base="$JUJU_BOOTSTRAP_BASE" --bootstrap-constraints="$JUJU_BOOTSTRAP_CONSTRAINTS" localhost "$CONTROLLER_NAME" || {
         echo "[!] Failed to bootstrap Juju controller."
         exit 1
     }
