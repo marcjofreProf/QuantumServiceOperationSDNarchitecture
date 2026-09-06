@@ -98,9 +98,7 @@ if ! command -v lxd &>/dev/null; then
     sudo systemctl reset-failed snap.lxd.daemon.service 2>/dev/null || true
     
     if ! sudo snap install lxd; then
-        echo "  -> LXD snap install failed. Cleaning mount namespaces, restarting snapd daemon and retrying..."
-        sudo umount -l /run/snapd/ns/*.mnt 2>/dev/null || true
-        sudo rm -f /run/snapd/ns/*.mnt 2>/dev/null || true
+        echo "  -> LXD snap install failed. Cleaning mount namespaces, restarting snapd daemon and retrying..."        
         sudo snap discard-ns lxd 2>/dev/null || true
         sudo systemctl restart snapd
         sleep 3
@@ -179,21 +177,60 @@ done
 
 # 3. Canonical Juju & Charmcraft Tooling Check / Auto-Install
 echo "[*] Verifying Canonical Juju tooling..."
+
 if ! command -v juju &>/dev/null; then
     echo "[!] Juju CLI not found. Installing via snap..."
-    if command -v snap &>/dev/null; then
-        sudo systemctl reset-failed snap.juju.fetch-oci.service 2>/dev/null || true
-        if ! sudo snap install juju --channel=3/stable; then
-            echo "  -> Snap install failed. Resetting snapd service and retrying..."
-            sudo systemctl restart snapd
-            sleep 3
-            sudo snap install juju --channel=3/stable
-        fi
-    else
-        echo "[!] Snap package manager not found. Please install Juju manually."
+
+    if ! command -v snap &>/dev/null; then
+        echo "[!] Snap package manager not found. Please install snapd first."
+        exit 1
     fi
+
+    # Make sure snapd is running
+    sudo systemctl reset-failed snapd.service 2>/dev/null || true
+    sudo systemctl restart snapd
+    sleep 3
+
+    # Install Juju
+    if ! sudo snap install juju --channel=3/stable; then
+        echo "[!] Failed to install Juju via snap."
+        echo "[!] This may indicate a snapd/mount-namespace problem."
+        exit 1
+    fi
+
+    echo "  -> Juju installed: $(juju --version | awk '{print $1}')"
+
 else
     echo "  -> Juju CLI is installed: $(juju --version | awk '{print $1}')"
+fi
+
+# ------------------------------------------------------------------
+# Verify that Juju's MongoDB snap can be installed.
+# Juju bootstrap will need this snap for the controller database.
+# ------------------------------------------------------------------
+echo "[*] Verifying Juju MongoDB (juju-db) snap..."
+
+if sudo snap list juju-db &>/dev/null; then
+    echo "  -> juju-db is already installed."
+else
+    echo "  -> juju-db is not installed. Installing..."
+
+    if ! sudo snap install juju-db --channel=4.4.30/stable; then
+        echo ""
+        echo "=================================================================="
+        echo "[!] ERROR: Failed to install juju-db."
+        echo "[!] Juju cannot bootstrap the controller until this is fixed."
+        echo ""
+        echo "    If this is WSL2, restart WSL from Windows:"
+        echo ""
+        echo "        wsl.exe --shutdown"
+        echo ""
+        echo "    Then reopen Ubuntu and rerun this script."
+        echo "=================================================================="
+        exit 1
+    fi
+
+    echo "  -> juju-db installed successfully."
 fi
 
 if ! command -v charmcraft &>/dev/null; then
@@ -210,8 +247,6 @@ fi
 # ==============================================================================
 purge_juju_lxd_trust() {
     echo "  -> Purging ghost Juju containers, profiles, and stale LXD trust certificates..."
-    sudo umount -l /run/snapd/ns/*.mnt 2>/dev/null || true
-    sudo rm -f /run/snapd/ns/*.mnt 2>/dev/null || true
     
     # Force delete lingering Juju LXD instances that hold locks
     for instance in $(lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
