@@ -136,9 +136,23 @@ sudo systemctl enable --now snap.lxd.daemon.unix.socket 2>/dev/null || true
 # The Juju controller itself will run in an LXD VM, so no nested-container
 # profile changes are required here. Leave the LXD default profile intact.
 
-# Auto-fix IPv6 routing issues conditionally to avoid unnecessary daemon restarts
-echo "  -> Checking LXD bridge network (lxdbr0) configuration..."
+# Auto-fix LXD profile and lxdbr0 network configuration for WSL2
+echo "  -> Checking LXD profile and bridge network (lxdbr0) configuration..."
 LXD_RESTART_NEEDED=false
+
+# Disable SecureBoot on default profile to prevent QEMU boot stalls
+if [ "$(sudo lxc profile get default security.secureboot 2>/dev/null)" != "false" ]; then
+    echo "  -> Disabling SecureBoot on default LXD profile..."
+    sudo lxc profile set default security.secureboot false 2>/dev/null || true
+    LXD_RESTART_NEEDED=true
+fi
+
+# Force DNS forwarding to prevent cloud-init network timeouts
+if ! sudo lxc network get lxdbr0 raw.dnsmasq 2>/dev/null | grep -q "server=8.8.8.8"; then
+    echo "  -> Setting public DNS upstream on lxdbr0..."
+    sudo lxc network set lxdbr0 raw.dnsmasq "server=8.8.8.8" || true
+    LXD_RESTART_NEEDED=true
+fi
 
 if [ "$(sudo lxc network get lxdbr0 ipv6.address 2>/dev/null)" != "none" ]; then
     echo "  -> Disabling IPv6 on lxdbr0..."
