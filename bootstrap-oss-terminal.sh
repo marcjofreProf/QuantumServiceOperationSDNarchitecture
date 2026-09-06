@@ -62,8 +62,8 @@ if [ ! -S "$XDG_RUNTIME_DIR/bus" ]; then
 fi
 
 echo "[*] Verifying system dependencies..."
-# Pre-load required Charmcraft build dependencies, iptables, and shadow/passwd utils
-SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd" "iptables")
+# Pre-load required Charmcraft build dependencies, iptables, apparmor, and shadow/passwd utils
+SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd" "iptables" "apparmor" "apparmor-utils")
 
 if ! python3 -c "import ensurepip" &>/dev/null; then
     SYSTEM_DEPS+=("python3-venv")
@@ -79,6 +79,9 @@ if [ ${#SYSTEM_DEPS[@]} -ne 0 ]; then
     sudo apt-get update -y
     sudo apt-get install -y "${SYSTEM_DEPS[@]}"
 fi
+
+# Ensure AppArmor daemon is running on host
+sudo systemctl enable --now apparmor 2>/dev/null || true
 
 # 2. LXD Group Check & Persistent Session Elevation
 echo "[*] Verifying LXD environment & permissions..."
@@ -124,8 +127,12 @@ if ! id -nG | grep -qw "lxd"; then
 fi
 
 sudo lxd init --auto || true
+
+# Configure LXD default profile for unconfined nesting (required for snapd inside LXD in WSL2)
 sudo lxc profile set default security.nesting true 2>/dev/null || true
 sudo lxc profile set default security.privileged true 2>/dev/null || true
+sudo lxc profile set default raw.lxc "lxc.apparmor.profile=unconfined" 2>/dev/null || true
+sudo lxc profile set default security.syscalls.intercept.mknod true 2>/dev/null || true
 sudo mount --make-rshared / 2>/dev/null || true
 sudo mount --make-rshared /run 2>/dev/null || true
 
@@ -202,7 +209,7 @@ fi
 # Purge Ghost LXD Containers and Stale Juju Certificates
 # ==============================================================================
 purge_juju_lxd_trust() {
-    echo "  -> Purging ghost Juju containers and stale LXD trust certificates..."
+    echo "  -> Purging ghost Juju containers, profiles, and stale LXD trust certificates..."
     sudo umount -l /run/snapd/ns/*.mnt 2>/dev/null || true
     sudo rm -f /run/snapd/ns/*.mnt 2>/dev/null || true
     
@@ -210,6 +217,12 @@ purge_juju_lxd_trust() {
     for instance in $(lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
         echo "     [Removing ghost container: ${instance}]"
         lxc delete "$instance" --force 2>/dev/null || sudo lxc delete "$instance" --force 2>/dev/null || true
+    done
+
+    # Force delete stale Juju LXD profiles so updated default settings are inherited
+    for prof in $(lxc profile list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
+        echo "     [Removing stale Juju profile: ${prof}]"
+        lxc profile delete "$prof" 2>/dev/null || sudo lxc profile delete "$prof" 2>/dev/null || true
     done
 
     # Clean local Juju client caches
