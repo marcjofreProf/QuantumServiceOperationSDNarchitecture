@@ -55,6 +55,28 @@ Utilized for intent-based provisioning by automatically translating orchestrator
 * Trigger the RESTCONF service provisioning action
 ./tests/test-juju-example-switching-action.sh
 
+3. End-to-End Performance & Statistical Protocol Benchmarking
+
+To evaluate and compare performance across both Northbound (RESTCONF vs. direct gNMI) and Southbound (NETCONF vs. gNOI) protocol paths, a dedicated statistical benchmarking tool is provided.
+
+The benchmark measures real lifecycle latency across multiple execution rounds and seamlessly supports execution against either physical hardware nodes or the in-cluster simulated target (devicesim-1).
+
+a. Run against Physical Node Hardware:
+```bash
+TARGET_DEVICE="quantum-node-1" TARGET_NODE_IP="10.0.0.254" ./tests/test-sdn-protocol-switching-performance.sh 10
+```
+b. Run against Simulated Target (devicesim-1):
+```bash
+TARGET_DEVICE="devicesim-1" TARGET_NODE_IP="127.0.0.1" ./tests/test-sdn-protocol-switching-performance.sh 10
+```
+
+Execution Particularities & Parameters:
+TARGET_DEVICE (Environment Variable): Specifies the ONOS topology target entity name. Set to quantum-node-1 for physical node testing, or devicesim-1 for local/in-cluster simulator testing.
+
+TARGET_NODE_IP (Environment Variable): Defines the network IP address of the target switching node (10.0.0.254 for physical hardware, or 127.0.0.1 / cluster IP for simulator).
+
+[ITERATIONS] (Positional Argument): Number of full lifecycle executions to perform per protocol path (e.g., 10). Higher iterations generate statistical metrics: Mean (μ), Standard Deviation (σ), Minimum, and Maximum latency.
+
 ## Installation & Bootstrapping
 Clone the repository and run the bootstrap script to create your virtual environment, install dependencies, and compile the necessary gRPC and YANG schemas:
 
