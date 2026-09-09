@@ -1,4 +1,3 @@
-```bash
 #!/usr/bin/env bash
 # ./bootstrap-oss-terminal.sh
 # Environment setup for QuantumServiceOperationSDNarchitecture
@@ -385,4 +384,3 @@ echo "[+] Optional Juju tests available in ./tests/"
 echo -e "To view your pods and juju services, run:"
 echo -e "  juju status --watch 5s"
 echo "=================================================================="
-```
