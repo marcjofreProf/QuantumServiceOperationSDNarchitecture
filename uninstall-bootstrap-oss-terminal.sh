@@ -12,6 +12,16 @@ CONTROLLER_NAME="terminal-controller"
 CONTROLLER_VM="juju-${CONTROLLER_NAME}-0"
 VENV_DIR=".venv"
 
+# Ensure mount propagation and clear stale snap namespaces before running Juju
+sudo mount --make-rshared / 2>/dev/null || true
+if command -v juju &>/dev/null && ! juju version &>/dev/null; then
+    sudo umount -l /run/snapd/ns/juju.mnt 2>/dev/null || true
+    sudo /usr/lib/snapd/snap-discard-ns juju 2>/dev/null || true
+    sudo rm -rf /run/snapd/ns/juju* 2>/dev/null || true
+    sudo systemctl restart apparmor snapd 2>/dev/null || true
+    sleep 2
+fi
+
 # ------------------------------------------------------------------------------
 # 1. Stop and remove RESTCONF systemd service
 # ------------------------------------------------------------------------------
