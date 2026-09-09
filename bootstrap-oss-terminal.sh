@@ -160,14 +160,6 @@ else
     echo "  -> Charmcraft is installed: $(charmcraft --version | awk '{print $1}')"
 fi
 
-# ==============================================================================
-# Clean Local Juju Client State
-# ==============================================================================
-purge_juju_local_state() {
-    echo "  -> Cleaning stale local Juju client state..."
-    rm -rf ~/.local/share/juju ~/.config/juju
-}
-
 # 4. Juju Controller & Model Provisioning
 echo "[*] Verifying Juju Controller..."
 CONTROLLER_NAME="terminal-controller"
@@ -228,14 +220,8 @@ if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
 else
     echo "[!] '$CONTROLLER_NAME' is not registered locally."
 
-    # Only purge known stale local Juju state when there is no controller
-    # registration at all. This protects a valid persistent controller from
-    # being destroyed after a power cycle.
-    echo "  -> No registered controller found; ensuring clean local Juju state..."
-    purge_juju_local_state
-
+    echo "  -> No registered controller found; preparing local Juju bootstrap..."
     juju clouds --client --format yaml
-    
     echo "  -> Bootstrapping local controller..."
     juju bootstrap \
         "$CLOUD_NAME" \
