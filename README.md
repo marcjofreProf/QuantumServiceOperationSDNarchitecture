@@ -26,6 +26,7 @@ QuantumServiceOperationSDNarchitecture/
 ├── bootstrap-oss-terminal.sh            # Setup script (venv, dependencies, schemas)
 ├── uninstall-bootstrap-oss-terminal.sh  # Cleanup script
 └── requirements.txt     # Python project dependencies
+```
 
 ## Orchestration via Canonical Juju
 
@@ -40,9 +41,10 @@ This terminal agent operates on a dual-protocol model to align with modern telec
 
 *Example Usage:* To dynamically query the real-time status of a switching node on the data plane, the terminal or Juju charm executes:
    ```bash
-   python3 scripts/terminal-gnoi-switching-client.py <NODE_IP> status
-   python3 scripts/terminal-gnoi-switching-client.py <NODE_IP> connect
-   python3 scripts/terminal-gnoi-switching-client.py <NODE_IP> disconnect
+   python3 ./scripts/terminal-gnoi-switching-client.py <NODE_IP> status
+   python3 ./scripts/terminal-gnoi-switching-client.py <NODE_IP> connect
+   python3 ./scripts/terminal-gnoi-switching-client.py <NODE_IP> disconnect
+   ```
 
 2. High-Level Service Orchestration (YANG / RESTCONF via Juju):
 Utilized for intent-based provisioning by automatically translating orchestrator intents into local terminal configurations. The terminal maps these underlying network data models into standard YANG schemas and transmits them via RESTCONF to the controller.
