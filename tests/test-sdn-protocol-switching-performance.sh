@@ -21,12 +21,17 @@ get_time_ms() {
 
 time_exec() {
     local cmd="$1"
-    local start_t end_t elapsed
+    local start_t end_t elapsed status
     start_t=$(get_time_ms)
-    eval "$cmd" >/dev/null 2>&1
-    end_t=$(get_time_ms)
-    elapsed=$((end_t - start_t))
-    echo "$elapsed"
+    
+    # Capture command output and exit status
+    if out=$(eval "$cmd" 2>&1); then
+        end_t=$(get_time_ms)
+        elapsed=$((end_t - start_t))
+        echo "$elapsed"
+    else
+        echo "FAILED"
+    fi
 }
 
 calc_stats() {
