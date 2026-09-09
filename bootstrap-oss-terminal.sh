@@ -77,7 +77,7 @@ if [ ! -S "$XDG_RUNTIME_DIR/bus" ]; then
 fi
 
 echo "[*] Verifying system dependencies..."
-SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd" "iptables" "apparmor" "apparmor-utils" "util-linux-extra")
+SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd" "iptables" "apparmor" "apparmor-utils" "util-linux-extra" "openssh-server" "openssh-client")
 
 if ! python3 -c "import ensurepip" &>/dev/null; then
     SYSTEM_DEPS+=("python3-venv")
