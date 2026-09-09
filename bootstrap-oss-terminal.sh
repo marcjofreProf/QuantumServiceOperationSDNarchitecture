@@ -1,3 +1,4 @@
+```bash
 #!/usr/bin/env bash
 # ./bootstrap-oss-terminal.sh
 # Environment setup for QuantumServiceOperationSDNarchitecture
@@ -63,7 +64,7 @@ fi
 
 echo "[*] Verifying system dependencies..."
 # Pre-load required Charmcraft build dependencies, iptables, apparmor, and shadow/passwd utils
-SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd" "iptables" "apparmor" "apparmor-utils")
+SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd" "iptables" "apparmor" "apparmor-utils" "openssh-server")
 
 if ! python3 -c "import ensurepip" &>/dev/null; then
     SYSTEM_DEPS+=("python3-venv")
@@ -83,113 +84,51 @@ fi
 # Ensure AppArmor daemon is running on host
 sudo systemctl enable --now apparmor 2>/dev/null || true
 
-# 2. LXD Group Check & Persistent Session Elevation
-echo "[*] Verifying LXD environment & permissions..."
+# 2. Local SSH Check for Juju Unmanaged Controller
+echo "[*] Verifying local SSH environment..."
 
-# Juju controller is bootstrapped as an LXD virtual machine.
-# Do not configure LXD's default profile as privileged/unconfined or force
-# recursive mount propagation: those workarounds are for nested system
-# containers and are unnecessary for an LXD VM controller.
-
-if ! command -v lxd &>/dev/null; then
-    echo "  -> LXD is missing. Cleaning stale namespaces and installing via snap..."
-    sudo umount -l /run/snapd/ns/*.mnt 2>/dev/null || true
-    sudo rm -f /run/snapd/ns/*.mnt 2>/dev/null || true
-    sudo snap discard-ns lxd 2>/dev/null || true
-    sudo systemctl reset-failed snap.lxd.daemon.service 2>/dev/null || true
-    
-    if ! sudo snap install lxd; then
-        echo "  -> LXD snap install failed. Cleaning mount namespaces, restarting snapd daemon and retrying..."        
-        sudo snap discard-ns lxd 2>/dev/null || true
-        sudo systemctl restart snapd
-        sleep 3
-        sudo snap install lxd
-    fi
+if ! command -v sshd &>/dev/null; then
+    echo "[!] OpenSSH server is missing."
+    echo "    It should have been installed with the system dependencies."
+    exit 1
 fi
 
-if ! id -nG "$USER" | grep -qw "lxd"; then
-    echo "  -> Adding $USER to the lxd group..."
-    sudo usermod -aG lxd "$USER"
+echo "  -> Ensuring SSH daemon is enabled and running..."
+sudo systemctl enable --now ssh 2>/dev/null || sudo systemctl enable --now sshd 2>/dev/null || {
+    echo "[!] Failed to start the SSH daemon."
+    exit 1
+}
+
+# Juju controller is bootstrapped directly on the WSL host using the
+# unmanaged/manual provider. No LXD or nested virtualization is required.
+JUJU_SSH_KEY="$HOME/.ssh/juju_bootstrap_ed25519"
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+
+if [ ! -f "$JUJU_SSH_KEY" ]; then
+    echo "  -> Creating a dedicated SSH key for the local Juju bootstrap..."
+    ssh-keygen -q -t ed25519 -N "" -f "$JUJU_SSH_KEY"
 fi
 
-# Make LXD group membership persistent for future WSL shell sessions
-if ! grep -q "exec sudo -E -u" ~/.bashrc; then
-    echo "  -> Injecting LXD group auto-elevation into ~/.bashrc..."
-    echo -e "\n# Auto-elevate LXD group for Juju/Charmcraft in WSL" >> ~/.bashrc
-    echo "if ! id -nG | grep -qw 'lxd' && grep -q '^lxd:.*:$USER' /etc/group; then exec sudo -E -u \"\$USER\" -g lxd \"\$SHELL\"; fi" >> ~/.bashrc
+touch "$HOME/.ssh/authorized_keys"
+chmod 600 "$HOME/.ssh/authorized_keys"
+
+if ! grep -Fqx "$(cat "${JUJU_SSH_KEY}.pub")" "$HOME/.ssh/authorized_keys" 2>/dev/null; then
+    echo "  -> Authorizing the Juju bootstrap SSH key..."
+    cat "${JUJU_SSH_KEY}.pub" >> "$HOME/.ssh/authorized_keys"
 fi
 
-# Elevate current script execution context to include effective group 'lxd'
-if ! id -nG | grep -qw "lxd"; then
-    echo "  -> Elevating LXD group session and restarting bootstrap process..."
-    exec sudo -E -u "$USER" -g lxd bash "$0" "$@"
+if ! ssh -o BatchMode=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -i "$JUJU_SSH_KEY" \
+        "$USER@127.0.0.1" true >/dev/null 2>&1; then
+    echo "[!] Local SSH connectivity test failed."
+    echo "    Juju requires SSH access to the WSL host for the unmanaged controller."
+    exit 1
 fi
 
-sudo lxd init --auto || true
-
-# Ensure the LXD snap daemon is enabled and running. This is important after a
-# host/VM reboot: LXD must come back before its VMs can be auto-started.
-echo "  -> Ensuring LXD daemon is enabled at boot..."
-sudo systemctl enable --now snap.lxd.daemon.service 2>/dev/null || true
-sudo systemctl enable --now snap.lxd.daemon.unix.socket 2>/dev/null || true
-
-# The Juju controller itself will run in an LXD VM, so no nested-container
-# profile changes are required here. Leave the LXD default profile intact.
-
-# Auto-fix LXD profile and lxdbr0 network configuration for WSL2
-echo "  -> Checking LXD profile and bridge network (lxdbr0) configuration..."
-LXD_RESTART_NEEDED=false
-
-# Disable SecureBoot on default profile to prevent QEMU boot stalls
-if [ "$(sudo lxc profile get default security.secureboot 2>/dev/null)" != "false" ]; then
-    echo "  -> Disabling SecureBoot on default LXD profile..."
-    sudo lxc profile set default security.secureboot false 2>/dev/null || true
-    LXD_RESTART_NEEDED=true
-fi
-
-# Force DNS forwarding to prevent cloud-init network timeouts
-if ! sudo lxc network get lxdbr0 raw.dnsmasq 2>/dev/null | grep -q "server=8.8.8.8"; then
-    echo "  -> Setting public DNS upstream on lxdbr0..."
-    sudo lxc network set lxdbr0 raw.dnsmasq "server=8.8.8.8" || true
-    LXD_RESTART_NEEDED=true
-fi
-
-if [ "$(sudo lxc network get lxdbr0 ipv6.address 2>/dev/null)" != "none" ]; then
-    echo "  -> Disabling IPv6 on lxdbr0..."
-    sudo lxc network set lxdbr0 ipv6.address none || true
-    LXD_RESTART_NEEDED=true
-fi
-
-sudo lxc network set lxdbr0 ipv4.address auto || true
-sudo lxc network set lxdbr0 ipv4.nat true || true
-
-# Fix WSL2 LXD internet routing (Docker/WSL firewall conflict)
-echo "  -> Applying and saving iptables forwarding fix..."
-sudo iptables -P FORWARD ACCEPT || true
-
-if ! dpkg -l | grep -qw iptables-persistent; then
-    echo "  -> Installing iptables-persistent to make rules survive reboots..."
-    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
-    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq iptables-persistent
-fi
-sudo netfilter-persistent save >/dev/null 2>&1 || true
-
-if [ "$LXD_RESTART_NEEDED" = true ]; then
-    echo "  -> Network changes applied. Restarting LXD daemon..."
-    sudo snap restart lxd || true
-fi
-
-# Active wait loop for LXD API to prevent Charmcraft/Juju timeouts
-echo "  -> Waiting for LXD API to become fully responsive..."
-for i in {1..15}; do
-    if timeout 3s lxc info &>/dev/null || timeout 3s sudo lxc info &>/dev/null; then
-        echo "  -> LXD daemon is ready."
-        break
-    fi
-    echo "     [LXD API unresponsive, retrying in 2s...] ($i/15)"
-    sleep 2
-done
+echo "  -> Local SSH connectivity is working."
 
 # 3. Canonical Juju & Charmcraft Tooling Check / Auto-Install
 echo "[*] Verifying Canonical Juju tooling..."
@@ -223,111 +162,45 @@ else
 fi
 
 # ==============================================================================
-# Purge Ghost LXD Containers and Stale Juju Certificates
+# Clean Local Juju Client State
 # ==============================================================================
-purge_juju_lxd_trust() {
-    echo "  -> Purging ghost Juju containers, profiles, and stale LXD trust certificates..."
-    
-    # Force delete lingering Juju LXD instances that hold locks
-    for instance in $(lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
-        echo "     [Removing ghost container: ${instance}]"
-        lxc delete "$instance" --force 2>/dev/null || sudo lxc delete "$instance" --force 2>/dev/null || true
-    done
-
-    # Force delete stale Juju LXD profiles so updated default settings are inherited
-    for prof in $(lxc profile list --format csv -c n 2>/dev/null | grep -E '^juju-' || true); do
-        echo "     [Removing stale Juju profile: ${prof}]"
-        lxc profile delete "$prof" 2>/dev/null || sudo lxc profile delete "$prof" 2>/dev/null || true
-    done
-
-    # Clean local Juju client caches
+purge_juju_local_state() {
+    echo "  -> Cleaning stale local Juju client state..."
     rm -rf ~/.local/share/juju ~/.config/juju
-
-    # Parse LXD JSON trust store to strip 'juju' certs by fingerprint and name
-    python3 - << 'EOF'
-import json, subprocess
-
-def run_cmd(cmd):
-    try:
-        return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
-    except Exception:
-        return ""
-
-for sudo_prefix in [[], ["sudo"]]:
-    raw_json = run_cmd(sudo_prefix + ["lxc", "config", "trust", "list", "--format", "json"])
-    if raw_json:
-        try:
-            certs = json.loads(raw_json)
-            for cert in certs:
-                fp = cert.get("fingerprint", "")
-                name = cert.get("name", "")
-                if "juju" in name.lower() or name == "juju":
-                    if fp:
-                        run_cmd(sudo_prefix + ["lxc", "config", "trust", "rm", fp])
-                    if name:
-                        run_cmd(sudo_prefix + ["lxc", "config", "trust", "rm", name])
-        except Exception:
-            pass
-
-run_cmd(["lxc", "config", "trust", "rm", "juju"])
-run_cmd(["sudo", "lxc", "config", "trust", "rm", "juju"])
-EOF
 }
 
 # 4. Juju Controller & Model Provisioning
 echo "[*] Verifying Juju Controller..."
 CONTROLLER_NAME="terminal-controller"
 
-# Run the Juju controller itself as an LXD VM rather than an LXD system
-# container. This avoids snapd mount-namespace issues inside nested LXD
-# containers (e.g. juju-db installation failures).
-JUJU_BOOTSTRAP_CONSTRAINTS="cores=2 mem=4G root-disk=20G virt-type=virtual-machine"
+# Run the Juju controller directly on the WSL host using Juju's
+# unmanaged/manual provider rather than an LXD container or VM.
 JUJU_BOOTSTRAP_BASE="ubuntu@24.04"
+CLOUD_NAME="terminal-local"
 
-echo "  -> Juju controller bootstrap mode: LXD virtual machine"
-echo "  -> Bootstrap constraints: ${JUJU_BOOTSTRAP_CONSTRAINTS}"
+echo "  -> Juju controller bootstrap mode: local WSL host"
 
-# Verify that the LXD backend can create VMs before asking Juju to bootstrap.
-# This catches missing / unsupported KVM virtualization early and produces a
-# useful error instead of failing much later during Juju provisioning.
-if ! sudo lxc info >/dev/null 2>&1; then
-    echo "[!] LXD API is not available."
-    exit 1
+# Juju's unmanaged/manual provider connects to an existing machine over SSH.
+# Define the WSL host itself as the bootstrap endpoint.
+JUJU_CLOUD_FILE="$(mktemp)"
+trap 'rm -f "$JUJU_CLOUD_FILE"' EXIT
+
+cat > "$JUJU_CLOUD_FILE" <<EOF
+clouds:
+  ${CLOUD_NAME}:
+    type: manual
+    endpoint: ${USER}@127.0.0.1
+    regions:
+      default: {}
+EOF
+
+if ! juju clouds 2>/dev/null | awk '{print $1}' | grep -qx "$CLOUD_NAME"; then
+    echo "  -> Registering local unmanaged Juju cloud..."
+    juju add-cloud "$CLOUD_NAME" "$JUJU_CLOUD_FILE" || {
+        echo "[!] Failed to register the local Juju cloud."
+        exit 1
+    }
 fi
-
-LXD_VM_TEST="bootstrap-vm-test-$$"
-VM_TEST_OK=false
-if sudo lxc launch ubuntu:24.04 "$LXD_VM_TEST" --vm >/dev/null 2>&1; then
-    VM_TEST_OK=true
-    sudo lxc delete "$LXD_VM_TEST" --force >/dev/null 2>&1 || true
-fi
-
-if [ "$VM_TEST_OK" != true ]; then
-    echo "[!] LXD VM creation test failed."
-    echo "    The Juju controller is configured to run as an LXD VM."
-    echo "    Verify that the host supports nested hardware virtualization/KVM."
-    echo "    On WSL2, ensure nested virtualization is available to the WSL kernel."
-    exit 1
-fi
-
-# IMPORTANT: A controller can be temporarily unreachable immediately after a
-# host/WSL reboot while LXD, networking, cloud-init, and the controller VM are
-# still starting. Never destroy/re-bootstrap a controller merely because its
-# API is temporarily unavailable. First locate and start the persistent VM.
-
-JUJU_CONTROLLER_VM=""
-find_juju_controller_vm() {
-    # Juju normally names the controller machine using the controller name.
-    # Prefer the exact expected name so an application VM is never mistaken
-    # for the controller VM. Fall back to a Juju machine only if necessary.
-    local expected="juju-${CONTROLLER_NAME}-0"
-
-    if sudo lxc info "$expected" >/dev/null 2>&1; then
-        JUJU_CONTROLLER_VM="$expected"
-    else
-        JUJU_CONTROLLER_VM="$(sudo lxc list --format csv -c n 2>/dev/null | grep -E '^juju-' | head -n1 || true)"
-    fi
-}
 
 wait_for_juju_controller() {
     local attempts="${1:-30}"
@@ -345,62 +218,44 @@ wait_for_juju_controller() {
 if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
     echo "  -> Found local registration for '$CONTROLLER_NAME'."
 
-    find_juju_controller_vm
-    if [ -n "$JUJU_CONTROLLER_VM" ]; then
-        echo "  -> Controller VM: $JUJU_CONTROLLER_VM"
-
-        VM_STATE="$(sudo lxc list "$JUJU_CONTROLLER_VM" --format csv -c s 2>/dev/null || true)"
-        if [ "$VM_STATE" != "RUNNING" ]; then
-            echo "  -> Controller VM is '$VM_STATE'; starting it..."
-            sudo lxc start "$JUJU_CONTROLLER_VM" || {
-                echo "[!] Failed to start controller VM '$JUJU_CONTROLLER_VM'."
-                exit 1
-            }
-        fi
-
-        # Make automatic startup explicit and persistent.
-        sudo lxc config set "$JUJU_CONTROLLER_VM" boot.autostart true
-    else
-        echo "  -> No Juju controller VM found yet; waiting for LXD to settle..."
-    fi
-
     if wait_for_juju_controller 30; then
         echo "  -> Juju controller '$CONTROLLER_NAME' is active and reachable."
     else
         echo "[!] Juju controller '$CONTROLLER_NAME' is still unreachable after waiting."
         echo "    The existing controller has NOT been deleted or re-bootstrapped."
-        echo "    Check with: sudo lxc list"
-        echo "              juju status"
+        echo "    Check with: juju status"
         echo "              juju debug-log"
         exit 1
     fi
 else
     echo "[!] '$CONTROLLER_NAME' is not registered locally."
 
-    # Only purge known stale Juju instances when there is no controller
+    # Only purge known stale local Juju state when there is no controller
     # registration at all. This protects a valid persistent controller from
     # being destroyed after a power cycle.
-    echo "  -> No registered controller found; ensuring clean trust state..."
-    purge_juju_lxd_trust
+    echo "  -> No registered controller found; ensuring clean local Juju state..."
+    purge_juju_local_state
 
     echo "  -> Bootstrapping local controller..."
-    juju bootstrap --bootstrap-base="$JUJU_BOOTSTRAP_BASE" --bootstrap-constraints="$JUJU_BOOTSTRAP_CONSTRAINTS" localhost "$CONTROLLER_NAME" || {
+    juju bootstrap \
+        "$CLOUD_NAME" \
+        "$CONTROLLER_NAME" \
+        --bootstrap-base="$JUJU_BOOTSTRAP_BASE" \
+        --debug \
+        --verbose \
+        --keep-broken || {
         echo "[!] Failed to bootstrap Juju controller."
         exit 1
     }
 fi
 
-# Explicitly configure the controller VM for automatic startup after a host
-# reboot/power cycle. LXD will start it when the LXD daemon comes back.
-find_juju_controller_vm
-if [ -n "$JUJU_CONTROLLER_VM" ]; then
-    echo "[*] Configuring persistent automatic startup for $JUJU_CONTROLLER_VM..."
-    sudo lxc config set "$JUJU_CONTROLLER_VM" boot.autostart true
-    sudo lxc config set "$JUJU_CONTROLLER_VM" boot.autostart.delay 5
-    echo "  -> boot.autostart: $(sudo lxc config get "$JUJU_CONTROLLER_VM" boot.autostart)"
-    echo "  -> boot.autostart.delay: $(sudo lxc config get "$JUJU_CONTROLLER_VM" boot.autostart.delay)"
-else
-    echo "[!] WARNING: Could not identify the Juju controller VM."
+# The Juju controller runs directly on the WSL host. Its Juju services are
+# managed by systemd and therefore follow the WSL systemd lifecycle.
+echo "[*] Verifying Juju controller services..."
+if ! systemctl list-units --type=service --all 2>/dev/null | grep -q "jujud"; then
+    echo "[!] Juju controller systemd service could not be found."
+    echo "    Check with: systemctl list-units --type=service | grep juju"
+    exit 1
 fi
 
 # Check for and switch to the target model
@@ -508,29 +363,21 @@ echo "[*] Compiling gRPC stubs..."
 # =============================================================================
 echo "[*] Verifying reboot/power-cycle persistence..."
 
-# LXD itself must start with the host.
-LXD_BOOT_ENABLED=false
-if systemctl is-enabled snap.lxd.daemon.service >/dev/null 2>&1; then
-    LXD_BOOT_ENABLED=true
+# The Juju controller runs directly on the WSL host. Verify that systemd is
+# active and that Juju controller services are present.
+SYSTEMD_ACTIVE=false
+if [ "$(ps -p 1 -o comm=)" = "systemd" ]; then
+    SYSTEMD_ACTIVE=true
 fi
 
-find_juju_controller_vm
-
-if [ -n "$JUJU_CONTROLLER_VM" ]; then
-    AUTOSTART="$(sudo lxc config get "$JUJU_CONTROLLER_VM" boot.autostart 2>/dev/null || true)"
-    VM_STATE="$(sudo lxc list "$JUJU_CONTROLLER_VM" --format csv -c s 2>/dev/null || true)"
-
-    echo "  -> LXD daemon enabled at boot: $LXD_BOOT_ENABLED"
-    echo "  -> Juju controller VM: $JUJU_CONTROLLER_VM"
-    echo "  -> Controller VM state: $VM_STATE"
-    echo "  -> Controller VM boot.autostart: $AUTOSTART"
-
-    if [ "$AUTOSTART" != "true" ]; then
-        echo "[!] WARNING: Controller VM automatic startup is not enabled."
-    fi
-else
-    echo "[!] WARNING: Juju controller VM could not be found during final verification."
+JUJU_SERVICE_FOUND=false
+if systemctl list-units --type=service --all 2>/dev/null | grep -q "jujud"; then
+    JUJU_SERVICE_FOUND=true
 fi
+
+echo "  -> WSL systemd active: $SYSTEMD_ACTIVE"
+echo "  -> Juju controller service found: $JUJU_SERVICE_FOUND"
+echo "  -> Juju controller: $CONTROLLER_NAME"
 
 echo "=================================================================="
 echo "[+] Bootstrap complete! System and local environment ready."
@@ -538,3 +385,4 @@ echo "[+] Optional Juju tests available in ./tests/"
 echo -e "To view your pods and juju services, run:"
 echo -e "  juju status --watch 5s"
 echo "=================================================================="
+```
