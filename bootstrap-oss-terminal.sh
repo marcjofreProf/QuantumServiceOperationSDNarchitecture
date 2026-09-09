@@ -47,6 +47,18 @@ if grep -qi microsoft /proc/version 2>/dev/null || [ -n "$WSL_DISTRO_NAME" ]; th
 
     # Ensure root mount propagation is shared for Snap containers in WSL2
     sudo mount --make-rshared / 2>/dev/null || true
+    
+    # Proactively test and heal Snap mount namespace locks (juju.mnt)
+    if command -v juju &>/dev/null; then
+        if ! juju version &>/dev/null; then
+            echo "[!] Stale Snap mount namespace detected. Self-healing Juju runtime..."
+            sudo umount -l /run/snapd/ns/juju.mnt 2>/dev/null || true
+            sudo /usr/lib/snapd/snap-discard-ns juju 2>/dev/null || true
+            sudo rm -rf /run/snapd/ns/juju* 2>/dev/null || true
+            sudo systemctl restart apparmor snapd
+            sleep 2
+        fi
+    fi
 fi
 
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
@@ -65,7 +77,6 @@ if [ ! -S "$XDG_RUNTIME_DIR/bus" ]; then
 fi
 
 echo "[*] Verifying system dependencies..."
-# Pre-load required Charmcraft build dependencies, iptables, apparmor, and shadow/passwd utils
 SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd" "iptables" "apparmor" "apparmor-utils" "util-linux-extra")
 
 if ! python3 -c "import ensurepip" &>/dev/null; then
@@ -76,11 +87,20 @@ if ! command -v pip3 &>/dev/null; then
     SYSTEM_DEPS+=("python3-pip")
 fi
 
-if [ ${#SYSTEM_DEPS[@]} -ne 0 ]; then
-    echo "[!] Missing system packages: ${SYSTEM_DEPS[*]}"
+MISSING_DEPS=()
+for pkg in "${SYSTEM_DEPS[@]}"; do
+    if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
+        MISSING_DEPS+=("$pkg")
+    fi
+done
+
+if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
+    echo "[!] Missing system packages: ${MISSING_DEPS[*]}"
     echo "[*] Installing missing system packages via apt..."
     sudo apt-get update -y
-    sudo apt-get install -y "${SYSTEM_DEPS[@]}"
+    sudo apt-get install -y "${MISSING_DEPS[@]}"
+else
+    echo "  -> All required system dependencies are already installed."
 fi
 
 # Ensure AppArmor daemon is running on host
@@ -101,7 +121,7 @@ fi
 # Elevate current script execution context to include effective group 'lxd'
 if ! id -nG | grep -qw "lxd"; then
     echo "  -> Elevating LXD group session and restarting bootstrap process..."
-    exec sudo -E -u "$USER" -g lxd bash "$0" "$@"
+    exec sudo -E -u "$USER" -g lxd stdbuf -oL -eL bash "$0" "$@"
 fi
 
 sudo lxd init --auto 2>/dev/null || true
