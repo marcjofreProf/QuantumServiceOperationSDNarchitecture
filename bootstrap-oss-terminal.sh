@@ -207,7 +207,9 @@ clouds:
       default: {}
 EOF
 
-if ! juju clouds --client --format yaml 2>/dev/null | grep -q "^  ${CLOUD_NAME}:"; then
+if juju clouds --client --format yaml 2>/dev/null | grep -q "^  ${CLOUD_NAME}:"; then
+    echo "  -> Local Juju cloud '$CLOUD_NAME' is already registered."
+else
     echo "  -> Registering local unmanaged Juju cloud..."
     juju add-cloud "$CLOUD_NAME" --file "$JUJU_CLOUD_FILE" --client || {
         echo "[!] Failed to register the local Juju cloud."
