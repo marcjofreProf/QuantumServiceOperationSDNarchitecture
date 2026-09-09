@@ -83,6 +83,26 @@ fi
 # Ensure AppArmor daemon is running on host
 sudo systemctl enable --now apparmor 2>/dev/null || true
 
+# 1b. LXD Group Verification & Session Elevation
+echo "[*] Verifying LXD installation and group permissions..."
+if ! command -v lxd &>/dev/null; then
+    echo "  -> Installing LXD via snap..."
+    sudo snap install lxd --channel=latest/stable 2>/dev/null || true
+fi
+
+if ! id -nG "$USER" | grep -qw "lxd"; then
+    echo "  -> Adding $USER to the lxd group..."
+    sudo usermod -aG lxd "$USER"
+fi
+
+# Elevate current script execution context to include effective group 'lxd'
+if ! id -nG | grep -qw "lxd"; then
+    echo "  -> Elevating LXD group session and restarting bootstrap process..."
+    exec sudo -E -u "$USER" -g lxd bash "$0" "$@"
+fi
+
+sudo lxd init --auto 2>/dev/null || true
+
 # 2. Local SSH Check for Juju Unmanaged Controller
 echo "[*] Verifying local SSH environment..."
 
