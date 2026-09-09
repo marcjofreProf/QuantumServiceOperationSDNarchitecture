@@ -44,6 +44,9 @@ if grep -qi microsoft /proc/version 2>/dev/null || [ -n "$WSL_DISTRO_NAME" ]; th
     else
         echo "  -> systemd is active and running as PID 1."
     fi
+
+    # Ensure root mount propagation is shared for Snap containers in WSL2
+    sudo mount --make-rshared / 2>/dev/null || true
 fi
 
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
