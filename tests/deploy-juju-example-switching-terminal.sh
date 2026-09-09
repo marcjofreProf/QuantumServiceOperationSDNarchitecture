@@ -53,7 +53,7 @@ echo "[*] Packing the charm with Charmcraft..."
     
     # Clean up stale charms to prevent wildcard expansion errors on re-runs
     rm -f *.charm
-    charmcraft pack --destructive-mode
+    charmcraft pack
     
     # Safely identify and rename the newly packed charm
     PACKED_CHARM=$(ls *.charm | head -n 1)
