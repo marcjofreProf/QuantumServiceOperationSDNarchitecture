@@ -30,17 +30,7 @@ time_exec() {
 }
 
 calc_stats() {
-    python3 -c '
-import sys, math
-vals = [float(x) for x in sys.argv[1:] if x]
-if not vals:
-print("0.0|0.0|0|0")
-sys.exit(0)
-mean = sum(vals) / len(vals)
-variance = sum((x - mean) ** 2 for x in vals) / len(vals)
-stddev = math.sqrt(variance)
-print(f"{mean:.1f}|{stddev:.1f}|{int(min(vals))}|{int(max(vals))}")
-' "$@"
+    python3 -c 'import sys, math; vals = [float(x) for x in sys.argv[1:] if x]; print("0.0|0.0|0|0") if not vals else print(f"{sum(vals)/len(vals):.1f}|{math.sqrt(sum((x - sum(vals)/len(vals))**2 for x in vals)/len(vals)):.1f}|{int(min(vals))}|{int(max(vals))}")' "$@"
 }
 
 run_lifecycle_benchmark() {
