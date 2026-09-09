@@ -192,9 +192,9 @@ clouds:
       default: {}
 EOF
 
-if ! juju clouds 2>/dev/null | awk '{print $1}' | grep -qx "$CLOUD_NAME"; then
+if ! juju clouds --client 2>/dev/null | awk '{print $1}' | grep -qx "$CLOUD_NAME"; then
     echo "  -> Registering local unmanaged Juju cloud..."
-    juju add-cloud "$CLOUD_NAME" --file "$JUJU_CLOUD_FILE" || {
+    juju add-cloud "$CLOUD_NAME" --file "$JUJU_CLOUD_FILE" --client || {
         echo "[!] Failed to register the local Juju cloud."
         exit 1
     }
