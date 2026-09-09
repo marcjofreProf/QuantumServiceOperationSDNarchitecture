@@ -192,7 +192,7 @@ clouds:
       default: {}
 EOF
 
-if ! juju clouds --client 2>/dev/null | awk '{print $1}' | grep -qx "$CLOUD_NAME"; then
+if ! juju clouds --client --format yaml 2>/dev/null | grep -q "^  ${CLOUD_NAME}:"; then
     echo "  -> Registering local unmanaged Juju cloud..."
     juju add-cloud "$CLOUD_NAME" --file "$JUJU_CLOUD_FILE" --client || {
         echo "[!] Failed to register the local Juju cloud."
@@ -234,6 +234,8 @@ else
     echo "  -> No registered controller found; ensuring clean local Juju state..."
     purge_juju_local_state
 
+    juju clouds --client --format yaml
+    
     echo "  -> Bootstrapping local controller..."
     juju bootstrap \
         "$CLOUD_NAME" \
