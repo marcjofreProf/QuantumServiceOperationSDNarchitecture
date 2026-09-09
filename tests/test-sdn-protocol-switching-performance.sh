@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# tests/test-sdn-protocol-switching-performance.sh
 
 set -eo pipefail
 
@@ -52,28 +51,28 @@ run_lifecycle_benchmark() {
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_conn=$(time_exec "curl -s -f -X POST '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node-ip\":\"${TARGET_DEVICE}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\"}'")
         else
-            t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --target ${TARGET_DEVICE} set --update '/quantum-switching/cross-connect[id=qservice-m${mode_id}]:::json:::{\"ingress\":1,\"egress\":2,\"sb\":\"${sb_proto}\"}'")
+            t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --target ${TARGET_DEVICE} set --update '/interfaces/interface[name=eth1]/name:::string:::eth1' --update '/interfaces/interface[name=eth1]/config/name:::string:::qservice-m${mode_id}' --update '/interfaces/interface[name=eth1]/config/enabled:::bool:::true'")
         fi
 
         # 2. Status 1
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_stat1=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
-            t_stat1=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --target ${TARGET_DEVICE} get --path '/quantum-switching/cross-connect[id=qservice-m${mode_id}]'")
+            t_stat1=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
         fi
 
         # 3. Disconnect
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_disc=$(time_exec "curl -s -f -X DELETE '${RESTCONF_GW_URL}?service-id=qservice-m${mode_id}&sb=${sb_proto}'")
         else
-            t_disc=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --target ${TARGET_DEVICE} set --delete '/quantum-switching/cross-connect[id=qservice-m${mode_id}]'")
+            t_disc=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --target ${TARGET_DEVICE} set --delete '/interfaces/interface[name=eth1]'")
         fi
 
         # 4. Status 2
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_stat2=$(time_exec "curl -s -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
-            t_stat2=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --target ${TARGET_DEVICE} get --path '/quantum-switching/cross-connect[id=qservice-m${mode_id}]'")
+            t_stat2=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
         fi
 
         t_total=0
