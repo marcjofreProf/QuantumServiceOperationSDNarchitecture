@@ -117,9 +117,31 @@ if ! grep -Fqx "$(cat "${JUJU_SSH_KEY}.pub")" "$HOME/.ssh/authorized_keys" 2>/de
     cat "${JUJU_SSH_KEY}.pub" >> "$HOME/.ssh/authorized_keys"
 fi
 
+echo "  -> Configuring SSH for the local Juju bootstrap..."
+
+touch "$HOME/.ssh/config"
+chmod 600 "$HOME/.ssh/config"
+
+if ! grep -q "^Host 127\.0\.0\.1$" "$HOME/.ssh/config"; then
+    cat >> "$HOME/.ssh/config" <<EOF
+
+Host 127.0.0.1
+    User $USER
+    IdentityFile $JUJU_SSH_KEY
+    IdentitiesOnly yes
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    ControlMaster no
+EOF
+fi
+
+echo "  -> Testing local SSH connectivity for Juju..."
+
 if ! ssh -o BatchMode=yes \
         -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null \
+        -o IdentitiesOnly=yes \
+        -o ControlMaster=no \
         -i "$JUJU_SSH_KEY" \
         "$USER@127.0.0.1" true >/dev/null 2>&1; then
     echo "[!] Local SSH connectivity test failed."
@@ -128,6 +150,7 @@ if ! ssh -o BatchMode=yes \
 fi
 
 echo "  -> Local SSH connectivity is working."
+echo "  -> SSH key configured for Juju: $JUJU_SSH_KEY"
 
 # 3. Canonical Juju & Charmcraft Tooling Check / Auto-Install
 echo "[*] Verifying Canonical Juju tooling..."
@@ -190,6 +213,7 @@ if ! juju clouds --client --format yaml 2>/dev/null | grep -q "^  ${CLOUD_NAME}:
         echo "[!] Failed to register the local Juju cloud."
         exit 1
     }
+    echo "  -> Local Juju cloud '$CLOUD_NAME' registered successfully."
 fi
 
 wait_for_juju_controller() {
@@ -222,7 +246,13 @@ else
 
     echo "  -> No registered controller found; preparing local Juju bootstrap..."
     juju clouds --client --format yaml
-    echo "  -> Bootstrapping local controller..."
+    echo "  -> Bootstrapping local controller on WSL host..."
+    echo "     Cloud:      $CLOUD_NAME"
+    echo "     Controller: $CONTROLLER_NAME"
+    echo "     Host:       127.0.0.1"
+    echo "     User:       $USER"
+    echo "     SSH key:    $JUJU_SSH_KEY"
+    echo
     juju bootstrap \
         "$CLOUD_NAME" \
         "$CONTROLLER_NAME" \
@@ -233,6 +263,7 @@ else
         echo "[!] Failed to bootstrap Juju controller."
         exit 1
     }
+    echo "  -> Juju bootstrap completed successfully."
 fi
 
 # The Juju controller runs directly on the WSL host. Its Juju services are
