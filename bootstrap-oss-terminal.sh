@@ -63,7 +63,7 @@ fi
 
 echo "[*] Verifying system dependencies..."
 # Pre-load required Charmcraft build dependencies, iptables, apparmor, and shadow/passwd utils
-SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd" "iptables" "apparmor" "apparmor-utils" "openssh-server")
+SYSTEM_DEPS=("libffi-dev" "libyaml-dev" "python3-dev" "python3-setuptools" "python3-wheel" "passwd" "iptables" "apparmor" "apparmor-utils" "util-linux-extra")
 
 if ! python3 -c "import ensurepip" &>/dev/null; then
     SYSTEM_DEPS+=("python3-venv")
