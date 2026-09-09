@@ -21,11 +21,9 @@ get_time_ms() {
 
 time_exec() {
     local cmd="$1"
-    local start_t end_t elapsed status
+    local start_t end_t elapsed
     start_t=$(get_time_ms)
-    
-    # Capture command output and exit status
-    if out=$(eval "$cmd" 2>&1); then
+    if eval "$cmd" >/dev/null 2>&1; then
         end_t=$(get_time_ms)
         elapsed=$((end_t - start_t))
         echo "$elapsed"
@@ -35,7 +33,7 @@ time_exec() {
 }
 
 calc_stats() {
-    python3 -c 'import sys, math; vals = [float(x) for x in sys.argv[1:] if x]; print("0.0|0.0|0|0") if not vals else print(f"{sum(vals)/len(vals):.1f}|{math.sqrt(sum((x - sum(vals)/len(vals))**2 for x in vals)/len(vals)):.1f}|{int(min(vals))}|{int(max(vals))}")' "$@"
+    python3 -c 'import sys, math; vals = [float(x) for x in sys.argv[1:] if x.isdigit()]; print("0.0|0.0|0|0") if not vals else print(f"{sum(vals)/len(vals):.1f}|{math.sqrt(sum((x - sum(vals)/len(vals))**2 for x in vals)/len(vals)):.1f}|{int(min(vals))}|{int(max(vals))}")' "$@"
 }
 
 run_lifecycle_benchmark() {
@@ -78,7 +76,13 @@ run_lifecycle_benchmark() {
             t_stat2=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --target ${TARGET_DEVICE} get --path '/quantum-switching/cross-connect[id=qservice-m${mode_id}]'")
         fi
 
-        t_total=$((t_conn + t_stat1 + t_disc + t_stat2))
+        t_total=0
+        for val in "$t_conn" "$t_stat1" "$t_disc" "$t_stat2"; do
+            if [[ "$val" =~ ^[0-9]+$ ]]; then
+                t_total=$((t_total + val))
+            fi
+        done
+
         echo "Connect=${t_conn}ms | Total=${t_total}ms"
 
         conn_list="${conn_list} ${t_conn}"
