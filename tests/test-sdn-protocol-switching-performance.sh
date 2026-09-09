@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # tests/test-sdn-protocol-switching-performance.sh
-# Statistical E2E benchmark across 4 NB/SB protocol matrix paths in micro-onos
 
 set -eo pipefail
 
 ITERATIONS="${1:-5}"
+TARGET_DEVICE="${TARGET_DEVICE:-quantum-node-1}"
+TARGET_NODE_IP="${TARGET_NODE_IP:-10.0.0.254}"
+
 CONTROLLER_HOST="10.0.0.2"
 RESTCONF_GW_URL="http://${CONTROLLER_HOST}:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service"
 ONOS_GNMI_TARGET="${CONTROLLER_HOST}:5150"
-TARGET_DEVICE="devicesim-1"
 
 RESULTS_FILE="/tmp/sdn_benchmark_raw.txt"
 SUMMARY_FILE="/tmp/sdn_benchmark_summary.txt"
@@ -33,8 +34,8 @@ calc_stats() {
 import sys, math
 vals = [float(x) for x in sys.argv[1:] if x]
 if not vals:
-    print("0.0|0.0|0|0")
-    sys.exit(0)
+print("0.0|0.0|0|0")
+sys.exit(0)
 mean = sum(vals) / len(vals)
 variance = sum((x - mean) ** 2 for x in vals) / len(vals)
 stddev = math.sqrt(variance)
@@ -45,7 +46,8 @@ print(f"{mean:.1f}|{stddev:.1f}|{int(min(vals))}|{int(max(vals))}")
 run_lifecycle_benchmark() {
     local mode_id="$1" mode_name="$2" nb_proto="$3" sb_proto="$4"
     echo "=================================================================="
-    echo "  Running Benchmark Mode ${mode_id}: ${mode_name} (${ITERATIONS} Iterations)"
+    echo "  Running Benchmark Mode ${mode_id}: ${mode_name} (${ITERATIONS} Runs)"
+    echo "  Target: ${TARGET_DEVICE} (${TARGET_NODE_IP})"
     echo "=================================================================="
 
     local conn_list="" stat1_list="" disc_list="" stat2_list="" total_list=""
@@ -55,7 +57,7 @@ run_lifecycle_benchmark() {
 
         # 1. Connect
         if [ "$nb_proto" == "RESTCONF" ]; then
-            t_conn=$(time_exec "curl -s -f -X POST '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node-ip\":\"10.0.0.254\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\"}'")
+            t_conn=$(time_exec "curl -s -f -X POST '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node-ip\":\"${TARGET_DEVICE}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\"}'")
         else
             t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --target ${TARGET_DEVICE} set --update '/quantum-switching/cross-connect[id=qservice-m${mode_id}]:::json:::{\"ingress\":1,\"egress\":2,\"sb\":\"${sb_proto}\"}'")
         fi
@@ -91,7 +93,6 @@ run_lifecycle_benchmark() {
         total_list="${total_list} ${t_total}"
     done
 
-    # Calculate statistics
     IFS='|' read -r conn_avg conn_sd conn_min conn_max <<< "$(calc_stats $conn_list)"
     IFS='|' read -r stat1_avg stat1_sd stat1_min stat1_max <<< "$(calc_stats $stat1_list)"
     IFS='|' read -r disc_avg disc_sd disc_min disc_max <<< "$(calc_stats $disc_list)"
@@ -102,7 +103,6 @@ run_lifecycle_benchmark() {
     echo ""
 }
 
-# Run 4 Real Matrix Modes
 run_lifecycle_benchmark "1" "RESTCONF -> NETCONF" "RESTCONF" "NETCONF"
 run_lifecycle_benchmark "2" "RESTCONF -> gNOI"    "RESTCONF" "gNOI"
 run_lifecycle_benchmark "3" "gNMI -> NETCONF"     "gNMI"     "NETCONF"
