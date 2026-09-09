@@ -231,7 +231,7 @@ wait_for_juju_controller() {
     return 1
 }
 
-if juju controllers 2>&1 | grep -q "$CONTROLLER_NAME"; then
+if juju controllers 2>/dev/null | grep -q "$CONTROLLER_NAME"; then
     echo "  -> Found local registration for '$CONTROLLER_NAME'."
 
     if wait_for_juju_controller 30; then
@@ -255,13 +255,7 @@ else
     echo "     User:       $USER"
     echo "     SSH key:    $JUJU_SSH_KEY"
     echo
-    juju bootstrap \
-        "$CLOUD_NAME" \
-        "$CONTROLLER_NAME" \
-        --bootstrap-base="$JUJU_BOOTSTRAP_BASE" \
-        --debug \
-        --verbose \
-        --keep-broken || {
+    juju bootstrap --bootstrap-base="$JUJU_BOOTSTRAP_BASE" --bootstrap-constraints="$JUJU_BOOTSTRAP_CONSTRAINTS" localhost "$CONTROLLER_NAME" || {
         echo "[!] Failed to bootstrap Juju controller."
         exit 1
     }
