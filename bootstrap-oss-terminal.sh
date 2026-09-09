@@ -284,10 +284,9 @@ fi
 
 # The Juju controller runs directly on the WSL host. Its Juju services are
 # managed by systemd and therefore follow the WSL systemd lifecycle.
-echo "[*] Verifying Juju controller services..."
-if ! systemctl list-units --type=service --all 2>/dev/null | grep -q "jujud"; then
-    echo "[!] Juju controller systemd service could not be found."
-    echo "    Check with: systemctl list-units --type=service | grep juju"
+echo "[*] Verifying Juju controller container..."
+if ! lxc list 2>/dev/null | grep -q "juju-"; then
+    echo "[!] Juju controller LXD container could not be found."
     exit 1
 fi
 
@@ -404,7 +403,7 @@ if [ "$(ps -p 1 -o comm=)" = "systemd" ]; then
 fi
 
 JUJU_SERVICE_FOUND=false
-if systemctl list-units --type=service --all 2>/dev/null | grep -q "jujud"; then
+if lxc list 2>/dev/null | grep -q "juju-"; then
     JUJU_SERVICE_FOUND=true
 fi
 
