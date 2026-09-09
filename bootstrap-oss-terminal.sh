@@ -181,8 +181,7 @@ echo "  -> Juju controller bootstrap mode: local WSL host"
 
 # Juju's unmanaged/manual provider connects to an existing machine over SSH.
 # Define the WSL host itself as the bootstrap endpoint.
-JUJU_CLOUD_FILE="$(mktemp)"
-trap 'rm -f "$JUJU_CLOUD_FILE"' EXIT
+JUJU_CLOUD_FILE="./terminal-local-cloud.yaml"
 
 cat > "$JUJU_CLOUD_FILE" <<EOF
 clouds:
@@ -195,7 +194,7 @@ EOF
 
 if ! juju clouds 2>/dev/null | awk '{print $1}' | grep -qx "$CLOUD_NAME"; then
     echo "  -> Registering local unmanaged Juju cloud..."
-    juju add-cloud "$CLOUD_NAME" "$JUJU_CLOUD_FILE" || {
+    juju add-cloud "$CLOUD_NAME" --file "$JUJU_CLOUD_FILE" || {
         echo "[!] Failed to register the local Juju cloud."
         exit 1
     }
