@@ -103,6 +103,15 @@ else
     echo "  -> All required system dependencies are already installed."
 fi
 
+# Verify and install gnmic for gNMI benchmark tests
+if ! command -v gnmic &>/dev/null; then
+    echo "[*] Installing gnmic CLI tool..."
+    bash -c "$(curl -sL https://get-gnmic.openconfig.net)"
+    echo "  -> gnmic installed successfully."
+else
+    echo "  -> gnmic is already installed."
+fi
+
 # Ensure AppArmor daemon is running on host
 sudo systemctl enable --now apparmor 2>/dev/null || true
 
