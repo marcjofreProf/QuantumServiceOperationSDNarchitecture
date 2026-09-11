@@ -102,7 +102,7 @@ TARGET_DEVICE="quantum-node-1" TARGET_NODE_IP="10.0.0.254" ./tests/test-sdn-prot
 ```
 b. Run against Simulated Target (devicesim-1):
 ```bash
-TARGET_DEVICE="devicesim-1" TARGET_NODE_IP="127.0.0.1" ./tests/test-sdn-protocol-switching-performance.sh 10
+TARGET_DEVICE="devicesim-1" TARGET_NODE_IP="devicesim-1.micro-onos.svc.cluster.local" ./tests/test-sdn-protocol-switching-performance.sh 10
 ```
 
 Execution Particularities & Parameters:
