@@ -98,7 +98,7 @@ The benchmark measures real lifecycle latency across multiple execution rounds a
 
 a. Run against Physical Node Hardware:
 ```bash
-TARGET_DEVICE="quantum-node-1" TARGET_NODE_IP="10.0.0.254" ./tests/test-sdn-protocol-switching-performance.sh 10
+TARGET_DEVICE="quantum-node-1" TARGET_NODE_IP="quantum-node-1" ./tests/test-sdn-protocol-switching-performance.sh 10
 ```
 b. Run against Simulated Target (devicesim-1):
 ```bash
