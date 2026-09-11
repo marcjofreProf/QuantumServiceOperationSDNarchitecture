@@ -22,7 +22,7 @@ time_exec() {
     local cmd="$1"
     local start_t end_t elapsed
     start_t=$(get_time_ms)
-    if eval "$cmd" >/dev/null 2>&1; then
+    if eval "$cmd" >/tmp/nb_cmd_last_error.log 2>&1; then
         end_t=$(get_time_ms)
         elapsed=$((end_t - start_t))
         echo "$elapsed"
