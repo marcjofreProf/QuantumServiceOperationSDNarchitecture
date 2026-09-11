@@ -35,12 +35,24 @@ calc_stats() {
     python3 -c 'import sys, math; vals = [float(x) for x in sys.argv[1:] if x.isdigit()]; print("0.0|0.0|0|0") if not vals else print(f"{sum(vals)/len(vals):.1f}|{math.sqrt(sum((x - sum(vals)/len(vals))**2 for x in vals)/len(vals)):.1f}|{int(min(vals))}|{int(max(vals))}")' "$@"
 }
 
+ensure_gnmi_topo_aspect() {
+    echo "[*] Ensuring onos-topo targets gNMI port 50051 on ${TARGET_DEVICE}..."
+    kubectl exec -n micro-onos deployment/onos-cli -- onos topo set entity "${TARGET_DEVICE}" \
+      -a onos.topo.Configurable="{\"address\":\"${TARGET_NODE_IP}:50051\",\"type\":\"devicesim\",\"version\":\"1.0.x\"}" >/dev/null 2>&1 || true
+    sleep 1
+}
+
 run_lifecycle_benchmark() {
     local mode_id="$1" mode_name="$2" nb_proto="$3" sb_proto="$4"
     echo "=================================================================="
     echo "  Running Benchmark Mode ${mode_id}: ${mode_name} (${ITERATIONS} Runs)"
     echo "  Target: ${TARGET_DEVICE} (${TARGET_NODE_IP})"
     echo "=================================================================="
+
+    # Ensure gNMI port targeting when running pure gNMI southbound
+    if [ "$sb_proto" == "gNMI" ]; then
+        ensure_gnmi_topo_aspect
+    fi
 
     local conn_list="" stat1_list="" disc_list="" stat2_list="" total_list=""
 
@@ -51,7 +63,6 @@ run_lifecycle_benchmark() {
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_conn=$(time_exec "curl -s -f -X POST '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node-ip\":\"${TARGET_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\"}'")
         else
-            # Include metadata/path so onos-config dispatches via the target Southbound protocol (NETCONF or gNOI)
             t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --target ${TARGET_DEVICE} set --update '/interfaces/interface[name=eth1]/config/description:::string:::qservice-m${mode_id}-${sb_proto}'")
         fi
 
@@ -102,10 +113,15 @@ run_lifecycle_benchmark() {
     echo ""
 }
 
+# Original Modes
 run_lifecycle_benchmark "1" "RESTCONF -> NETCONF" "RESTCONF" "NETCONF"
 run_lifecycle_benchmark "2" "RESTCONF -> gNOI"    "RESTCONF" "gNOI"
 run_lifecycle_benchmark "3" "gNMI -> NETCONF"     "gNMI"     "NETCONF"
 run_lifecycle_benchmark "4" "gNMI -> gNOI"        "gNMI"     "gNOI"
+
+# Pure gNMI Modes
+run_lifecycle_benchmark "5" "gNMI -> gNMI"        "gNMI"     "gNMI"
+run_lifecycle_benchmark "6" "RESTCONF -> gNMI"    "RESTCONF" "gNMI"
 
 echo "========================================================================================================================="
 echo "                                SDN PROTOCOL BENCHMARK STATISTICAL SUMMARY (${ITERATIONS} Runs)                             "
