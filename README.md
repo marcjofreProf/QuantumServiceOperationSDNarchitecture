@@ -32,6 +32,39 @@ QuantumServiceOperationSDNarchitecture/
 
 To seamlessly integrate with ETSI OSM and Kubernetes, this architecture is wrapped and managed using **Canonical Juju**. Operating as the VCA (VNF Configuration and Abstraction) engine, Juju charms map our underlying network data models to higher-level orchestrator inputs. Juju handles lifecycle operations, automatically translating orchestrator intents into local terminal configurations and executing operational scripts.
 
+## mTLS Certificate & gNMI Configuration
+To execute gnmic operations against the remote micro-onos controller, valid mTLS certificates must be imported into /etc/onos/certs/ on your local host.
+
+1. Certificate Transfer Options
+Extract or deploy the certificate files (tls.crt, tls.key, tls.cacrt) from the controller host using one of the following methods:
+
+Option (i): Secure Copy (SCP) from Controller IP
+Ensure the certificates on the controller have read permissions, then pull them into a user folder before copying to /etc/onos/certs/:
+
+mkdir -p $HOME/onos/certs
+scp <username>@<@_IP_controller>:/etc/onos/certs/tls.* $HOME/onos/certs/
+sudo mkdir -p /etc/onos/certs
+sudo cp $HOME/onos/certs/tls.* /etc/onos/certs/
+sudo chmod 644 /etc/onos/certs/tls.*
+
+Option (ii): Manual Copy via Shared Folder
+If both host systems share a mounted directory or shared folder:
+
+Copy certificates to the shared mount point:
+sudo mkdir -p /etc/onos/certs
+sudo cp /path/to/shared_folder/tls.* /etc/onos/certs/
+sudo chmod 644 /etc/onos/certs/tls.*
+
+2. Local .gnmic.yaml Setup
+Generate the global gnmic configuration file in /etc/onos/certs/.gnmic.yaml. Note that tls-ca is omitted due to x509 CA constraints on the micro-onos generated secrets, relying on skip-verify: true for identity validation:
+
+cat << 'EOF' | sudo tee /etc/onos/certs/.gnmic.yaml > /dev/null
+skip-verify: true
+tls-cert: /etc/onos/certs/tls.crt
+tls-key: /etc/onos/certs/tls.key
+EOF
+sudo chmod 644 /etc/onos/certs/.gnmic.yaml
+
 ## SDN Protocol Architecture: Protobuf & YANG
 
 This terminal agent operates on a dual-protocol model to align with modern telecom SDN standards, effectively separating the control and management planes:
