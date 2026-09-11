@@ -36,15 +36,19 @@ calc_stats() {
 }
 
 ensure_gnmi_topo_aspect() {
-    echo "[*] Ensuring topology entity, kindID, and aspects exist for ${TARGET_NODE_IP}..."
-    kubectl exec -n micro-onos deployment/onos-cli -- onos topo create entity "${TARGET_NODE_IP}" -k "devicesim" >/dev/null 2>&1 || true
-    kubectl exec -n micro-onos deployment/onos-cli -- onos topo set entity "${TARGET_NODE_IP}" \
-      -a gnmi_address="${TARGET_NODE_IP}:50051" \
-      -a gnoi_address="${TARGET_NODE_IP}:50051" \
-      -a netconf_address="${TARGET_NODE_IP}:8300" \
-      -a onos.topo.TLSOptions='{"insecure":true,"plain":true}' \
-      -a onos.topo.Configurable="{\"address\":\"${TARGET_NODE_IP}:50051\",\"type\":\"devicesim\",\"version\":\"1.0.x\"}" >/dev/null 2>&1 || true
-    sleep 1
+    if command -v kubectl >/dev/null 2>&1; then
+        echo "[*] Ensuring topology entity, kindID, and aspects exist for ${TARGET_NODE_IP}..."
+        kubectl exec -n micro-onos deployment/onos-cli -- onos topo create entity "${TARGET_NODE_IP}" -k "devicesim" >/dev/null 2>&1 || true
+        kubectl exec -n micro-onos deployment/onos-cli -- onos topo set entity "${TARGET_NODE_IP}" \
+          -a gnmi_address="${TARGET_NODE_IP}:50051" \
+          -a gnoi_address="${TARGET_NODE_IP}:50051" \
+          -a netconf_address="${TARGET_NODE_IP}:8300" \
+          -a onos.topo.TLSOptions='{"insecure":true,"plain":true}' \
+          -a onos.topo.Configurable="{\"address\":\"${TARGET_NODE_IP}:50051\",\"type\":\"devicesim\",\"version\":\"1.0.x\"}" >/dev/null 2>&1 || true
+        sleep 1
+    else
+        echo "[*] Skipping kubectl topology setup (running from external terminal)..."
+    fi
 }
 
 run_lifecycle_benchmark() {
