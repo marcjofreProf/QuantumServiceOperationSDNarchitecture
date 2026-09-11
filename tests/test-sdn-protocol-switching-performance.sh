@@ -65,7 +65,7 @@ run_lifecycle_benchmark() {
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_disc=$(time_exec "curl -s -f -X DELETE '${RESTCONF_GW_URL}?service-id=qservice-m${mode_id}&sb=${sb_proto}'")
         else
-            t_disc=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --target ${TARGET_DEVICE} set --delete '/interfaces/interface[name=eth1]'")
+            t_disc=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --target ${TARGET_DEVICE} set --delete '/interfaces/interface[name=eth1]/config/description'")
         fi
 
         # 4. Status 2
