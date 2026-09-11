@@ -36,7 +36,8 @@ calc_stats() {
 }
 
 ensure_gnmi_topo_aspect() {
-    echo "[*] Registering complete topology aspects for ${TARGET_NODE_IP}..."
+    echo "[*] Ensuring topology entity, kindID, and aspects exist for ${TARGET_NODE_IP}..."
+    kubectl exec -n micro-onos deployment/onos-cli -- onos topo create entity "${TARGET_NODE_IP}" -k "devicesim" >/dev/null 2>&1 || true
     kubectl exec -n micro-onos deployment/onos-cli -- onos topo set entity "${TARGET_NODE_IP}" \
       -a gnmi_address="${TARGET_NODE_IP}:50051" \
       -a gnoi_address="${TARGET_NODE_IP}:50051" \
