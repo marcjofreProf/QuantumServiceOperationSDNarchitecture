@@ -37,27 +37,31 @@ calc_stats() {
 
 ensure_gnmi_topo_aspect() {
     if command -v kubectl >/dev/null 2>&1; then
-        echo "[*] Ensuring topology entity, kindID, and aspects exist for ${TARGET_DEVICE}..."
+        echo "[*] Ensuring topology entity and aspects exist for ${TARGET_DEVICE}..."
         
-        local node_address=""
+        local gnmi_addr=""
+        local netconf_addr=""
 
-        # Map the target device or target node string to its exact endpoint
         if [ "${TARGET_DEVICE}" == "devicesim-1" ] || [ "${TARGET_NODE_IP}" == "devicesim-1" ]; then
-            node_address="devicesim-1.micro-onos.svc.cluster.local:10161"
+            gnmi_addr="devicesim-1.micro-onos.svc.cluster.local:10161"
+            netconf_addr="devicesim-1.micro-onos.svc.cluster.local:8300"
         elif [ "${TARGET_DEVICE}" == "quantum-node-1" ] || [ "${TARGET_NODE_IP}" == "quantum-node-1" ] || [ "${TARGET_NODE_IP}" == "10.0.0.254" ]; then
-            node_address="10.0.0.254:50051"
+            gnmi_addr="10.0.0.254:50051"
+            netconf_addr="10.0.0.254:8300"
         else
-            node_address="${TARGET_NODE_IP}:50051"
+            gnmi_addr="${TARGET_NODE_IP}:50051"
+            netconf_addr="${TARGET_NODE_IP}:8300"
         fi
 
         kubectl exec -n micro-onos deployment/onos-cli -- onos topo create entity "${TARGET_DEVICE}" -k "devicesim" >/dev/null 2>&1 || true
         kubectl exec -n micro-onos deployment/onos-cli -- onos topo set entity "${TARGET_DEVICE}" \
-          -a gnmi_address="${node_address}" \
-          -a gnoi_address="${node_address}" \
-          -a netconf_address="${node_address%:*}":8300 \
+          -a gnmi_address="${gnmi_addr}" \
+          -a gnoi_address="${gnmi_addr}" \
+          -a netconf_address="${netconf_addr}" \
           -a onos.topo.TLSOptions='{"insecure":true,"plain":true}' \
-          -a onos.topo.Configurable="{\"address\":\"${node_address}\",\"type\":\"devicesim\",\"version\":\"1.0.x\"}" >/dev/null 2>&1 || true
-        sleep 1
+          -a onos.topo.Configurable="{\"address\":\"${gnmi_addr}\",\"type\":\"devicesim\",\"version\":\"1.0.x\"}" >/dev/null 2>&1 || true
+        
+        sleep 2
     fi
 }
 
