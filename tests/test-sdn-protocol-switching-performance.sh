@@ -46,8 +46,6 @@ ensure_gnmi_topo_aspect() {
           -a onos.topo.TLSOptions='{"insecure":true,"plain":true}' \
           -a onos.topo.Configurable="{\"address\":\"${TARGET_NODE_IP}:50051\",\"type\":\"devicesim\",\"version\":\"1.0.x\"}" >/dev/null 2>&1 || true
         sleep 1
-    else
-        echo "[*] Skipping kubectl topology setup (running from external terminal)..."
     fi
 }
 
