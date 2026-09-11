@@ -36,9 +36,12 @@ calc_stats() {
 }
 
 ensure_gnmi_topo_aspect() {
-    echo "[*] Directing onos-topo target to gNMI port 50051 (IP: ${TARGET_NODE_IP})..."
+    echo "[*] Registering complete protocol endpoints in onos-topo for ${TARGET_DEVICE} (${TARGET_NODE_IP})..."
     kubectl exec -n micro-onos deployment/onos-cli -- onos topo set entity "${TARGET_DEVICE}" \
-      -a onos.topo.Configurable="{\"address\":\"${TARGET_NODE_IP}:50051\",\"type\":\"devicesim\",\"version\":\"1.0.x\"}" >/dev/null 2>&1 || true
+      -a gnmi_address="${TARGET_NODE_IP}:50051" \
+      -a gnoi_address="${TARGET_NODE_IP}:50051" \
+      -a netconf_address="${TARGET_NODE_IP}:8300" \
+      -a onos.topo.TLSOptions='{"insecure":true,"plain":true}' >/dev/null 2>&1 || true
     sleep 1
 }
 
