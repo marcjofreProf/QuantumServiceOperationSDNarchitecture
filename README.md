@@ -40,30 +40,32 @@ Extract or deploy the certificate files (tls.crt, tls.key, tls.cacrt) from the c
 
 Option (i): Secure Copy (SCP) from Controller IP
 Ensure the certificates on the controller have read permissions, then pull them into a user folder before copying to /etc/onos/certs/:
-
+```bash
 mkdir -p $HOME/onos/certs
 scp <username>@<@_IP_controller>:/etc/onos/certs/tls.* $HOME/onos/certs/
 sudo mkdir -p /etc/onos/certs
 sudo cp $HOME/onos/certs/tls.* /etc/onos/certs/
 sudo chmod 644 /etc/onos/certs/tls.*
+```
 
 Option (ii): Manual Copy via Shared Folder
-If both host systems share a mounted directory or shared folder:
-
-Copy certificates to the shared mount point:
+If both host systems share a mounted directory or shared folder, copy certificates to the shared mount point:
+```bash
 sudo mkdir -p /etc/onos/certs
 sudo cp /path/to/shared_folder/tls.* /etc/onos/certs/
 sudo chmod 644 /etc/onos/certs/tls.*
+```
 
 2. Local .gnmic.yaml Setup
 Generate the global gnmic configuration file in /etc/onos/certs/.gnmic.yaml. Note that tls-ca is omitted due to x509 CA constraints on the micro-onos generated secrets, relying on skip-verify: true for identity validation:
-
+```bash
 cat << 'EOF' | sudo tee /etc/onos/certs/.gnmic.yaml > /dev/null
 skip-verify: true
 tls-cert: /etc/onos/certs/tls.crt
 tls-key: /etc/onos/certs/tls.key
 EOF
 sudo chmod 644 /etc/onos/certs/.gnmic.yaml
+```
 
 ## SDN Protocol Architecture: Protobuf & YANG
 
