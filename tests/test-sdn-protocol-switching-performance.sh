@@ -37,14 +37,27 @@ calc_stats() {
 
 ensure_gnmi_topo_aspect() {
     if command -v kubectl >/dev/null 2>&1; then
-        echo "[*] Ensuring topology entity, kindID, and aspects exist for ${TARGET_NODE_IP}..."
-        kubectl exec -n micro-onos deployment/onos-cli -- onos topo create entity "${TARGET_NODE_IP}" -k "devicesim" >/dev/null 2>&1 || true
-        kubectl exec -n micro-onos deployment/onos-cli -- onos topo set entity "${TARGET_NODE_IP}" \
-          -a gnmi_address="${TARGET_NODE_IP}:50051" \
-          -a gnoi_address="${TARGET_NODE_IP}:50051" \
-          -a netconf_address="${TARGET_NODE_IP}:8300" \
+        echo "[*] Ensuring topology entity, kindID, and aspects exist for ${TARGET_DEVICE}..."
+        
+        local node_host="${TARGET_NODE_IP}"
+        local gnmi_port="50051"
+        local netconf_port="8300"
+
+        # Dynamic resolution based on target entity
+        if [ "${TARGET_DEVICE}" == "devicesim-1" ] || [ "${TARGET_NODE_IP}" == "devicesim-1" ]; then
+            node_host="devicesim-1.micro-onos.svc.cluster.local"
+            gnmi_port="10161"
+        elif [ "${TARGET_NODE_IP}" == "quantum-node-1" ]; then
+            node_host="10.0.0.254"
+        fi
+
+        kubectl exec -n micro-onos deployment/onos-cli -- onos topo create entity "${TARGET_DEVICE}" -k "devicesim" >/dev/null 2>&1 || true
+        kubectl exec -n micro-onos deployment/onos-cli -- onos topo set entity "${TARGET_DEVICE}" \
+          -a gnmi_address="${node_host}:${gnmi_port}" \
+          -a gnoi_address="${node_host}:${gnmi_port}" \
+          -a netconf_address="${node_host}:${netconf_port}" \
           -a onos.topo.TLSOptions='{"insecure":true,"plain":true}' \
-          -a onos.topo.Configurable="{\"address\":\"${TARGET_NODE_IP}:50051\",\"type\":\"devicesim\",\"version\":\"1.0.x\"}" >/dev/null 2>&1 || true
+          -a onos.topo.Configurable="{\"address\":\"${node_host}:${gnmi_port}\",\"type\":\"devicesim\",\"version\":\"1.0.x\"}" >/dev/null 2>&1 || true
         sleep 1
     fi
 }
