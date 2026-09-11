@@ -7,7 +7,7 @@ TARGET_DEVICE="${TARGET_DEVICE:-quantum-node-1}"
 TARGET_NODE_IP="${TARGET_NODE_IP:-10.0.0.254}"
 
 CONTROLLER_HOST="10.0.0.2"
-RESTCONF_GW_URL="http://${CONTROLLER_HOST}:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service"
+RESTCONF_GW_URL="${RESTCONF_GW_URL:-http://localhost:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service}"
 ONOS_GNMI_TARGET="${CONTROLLER_HOST}:5150"
 
 RESULTS_FILE="/tmp/sdn_benchmark_raw.txt"
