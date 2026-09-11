@@ -36,7 +36,7 @@ calc_stats() {
 }
 
 ensure_gnmi_topo_aspect() {
-    echo "[*] Ensuring onos-topo targets gNMI port 50051 on ${TARGET_DEVICE}..."
+    echo "[*] Directing onos-topo target to gNMI port 50051 (IP: ${TARGET_NODE_IP})..."
     kubectl exec -n micro-onos deployment/onos-cli -- onos topo set entity "${TARGET_DEVICE}" \
       -a onos.topo.Configurable="{\"address\":\"${TARGET_NODE_IP}:50051\",\"type\":\"devicesim\",\"version\":\"1.0.x\"}" >/dev/null 2>&1 || true
     sleep 1
@@ -49,7 +49,6 @@ run_lifecycle_benchmark() {
     echo "  Target: ${TARGET_DEVICE} (${TARGET_NODE_IP})"
     echo "=================================================================="
 
-    # Ensure gNMI port targeting when running pure gNMI southbound
     if [ "$sb_proto" == "gNMI" ]; then
         ensure_gnmi_topo_aspect
     fi
@@ -113,13 +112,13 @@ run_lifecycle_benchmark() {
     echo ""
 }
 
-# Original Modes
+# Original Benchmark Modes
 run_lifecycle_benchmark "1" "RESTCONF -> NETCONF" "RESTCONF" "NETCONF"
 run_lifecycle_benchmark "2" "RESTCONF -> gNOI"    "RESTCONF" "gNOI"
 run_lifecycle_benchmark "3" "gNMI -> NETCONF"     "gNMI"     "NETCONF"
 run_lifecycle_benchmark "4" "gNMI -> gNOI"        "gNMI"     "gNOI"
 
-# Pure gNMI Modes
+# Native gNMI Baseline Modes
 run_lifecycle_benchmark "5" "gNMI -> gNMI"        "gNMI"     "gNMI"
 run_lifecycle_benchmark "6" "RESTCONF -> gNMI"    "RESTCONF" "gNMI"
 
