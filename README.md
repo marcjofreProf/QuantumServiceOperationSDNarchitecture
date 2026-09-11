@@ -114,15 +114,19 @@ TARGET_NODE_IP (Environment Variable): Defines the network IP address of the tar
 
 ## Installation & Bootstrapping
 Clone the repository and run the bootstrap script to create your virtual environment, install dependencies, and compile the necessary gRPC and YANG schemas:
-
+```bash
 git clone git clone https://github.com/marcjofreProf/QuantumServiceOperationSDNarchitecture.git
 cd QuantumServiceOperationSDNarchitecture
 sudo chmod +x ./bootstrap-oss-terminal.sh
 ./bootstrap-oss-terminal.sh
-
+```
 
 ## The Cleanup Script (`uninstall-bootstrap-oss-terminal.sh`)
 This script safely tears down the local environment, returning your repository to a perfectly clean state. It is useful for troubleshooting, resetting your setup, or preparing the directory for a fresh commit.
+```bash
+sudo chmod +x ./uninstall-bootstrap-oss-terminal.sh
+./uninstall-bootstrap-oss-terminal.sh
+```
 
 When executed, it safely removes all generated artifacts:
 *   **Removes the Environment:** Deletes the isolated `.venv/` directory.
