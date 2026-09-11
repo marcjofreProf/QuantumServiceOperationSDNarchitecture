@@ -112,6 +112,15 @@ else
     echo "  -> gnmic is already installed."
 fi
 
+# Verify and install grpcurl for gRPC/onos-topo debugging
+if ! command -v grpcurl &>/dev/null; then
+    echo "[*] Installing grpcurl CLI tool..."
+    curl -sSL https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_linux_x86_64.tar.gz | sudo tar -xz -C /usr/local/bin grpcurl
+    echo "  -> grpcurl installed successfully."
+else
+    echo "  -> grpcurl is already installed."
+fi
+
 # Ensure AppArmor daemon is running on host
 sudo systemctl enable --now apparmor 2>/dev/null || true
 
