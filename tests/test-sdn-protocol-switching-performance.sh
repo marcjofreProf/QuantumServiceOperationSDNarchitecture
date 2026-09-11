@@ -51,7 +51,8 @@ run_lifecycle_benchmark() {
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_conn=$(time_exec "curl -s -f -X POST '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node-ip\":\"${TARGET_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\"}'")
         else
-            t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --target ${TARGET_DEVICE} set --update '/interfaces/interface[name=eth1]/name:::string:::eth1' --update '/interfaces/interface[name=eth1]/config/name:::string:::eth1' --update '/interfaces/interface[name=eth1]/config/description:::string:::qservice-m${mode_id}' --update '/interfaces/interface[name=eth1]/config/enabled:::bool:::true'")
+            # Include metadata/path so onos-config dispatches via the target Southbound protocol (NETCONF or gNOI)
+            t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --target ${TARGET_DEVICE} set --update '/interfaces/interface[name=eth1]/config/description:::string:::qservice-m${mode_id}-${sb_proto}'")
         fi
 
         # 2. Status 1
