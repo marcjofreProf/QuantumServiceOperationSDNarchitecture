@@ -72,31 +72,31 @@ run_lifecycle_benchmark() {
 
         # Connect Phase
         if [ "$nb_proto" == "RESTCONF" ]; then
-            t_conn=$(time_exec "curl -s -f -X POST '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node-ip\":\"${TARGET_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\"}'")
+            t_conn=$(time_exec "curl -s -f -X POST '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node\":\"${TARGET_DEVICE}\",\"target-node-ip\":\"${TARGET_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\"}'")
         else
             # Handles Modes 3, 4, 5 (gNMI Northbound)
-            t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --target ${TARGET_DEVICE} set --update '/interfaces/interface[name=eth1]/config/name:::string:::eth1' --update '/interfaces/interface[name=eth1]/config/description:::string:::${service_desc}'")
+            t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --timeout 5s --target ${TARGET_DEVICE} set --update '/interfaces/interface[name=eth1]/config/description:::string:::${service_desc}'")
         fi
         
         # Status 1 Phase
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_stat1=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
-            t_stat1=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
+            t_stat1=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
         fi
         
         # Disconnect Phase
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_disc=$(time_exec "curl -s -f -X DELETE '${RESTCONF_GW_URL}?service-id=qservice-m${mode_id}&sb=${sb_proto}'")
         else
-            t_disc=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --target ${TARGET_DEVICE} set --delete '/interfaces/interface[name=eth1]/config/description'")
+            t_disc=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --timeout 5s --target ${TARGET_DEVICE} set --delete '/interfaces/interface[name=eth1]/config/description'")
         fi
         
         # Status 2 Phase
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_stat2=$(time_exec "curl -s -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
-            t_stat2=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
+            t_stat2=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
         fi
 
         t_total=0
