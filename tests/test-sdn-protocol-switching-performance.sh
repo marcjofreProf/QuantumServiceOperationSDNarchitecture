@@ -98,9 +98,9 @@ run_lifecycle_benchmark() {
             t_stat1=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
         fi
         
-        # Disconnect Phase
+        # Disconnect Phase (Handles Modes 1, 2, 6)
         if [ "$nb_proto" == "RESTCONF" ]; then
-            t_disc=$(time_exec "curl -s -f -X DELETE '${RESTCONF_GW_URL}?service-id=qservice-m${mode_id}&sb=${sb_proto}'")
+            t_disc=$(time_exec "curl -s -f -X DELETE '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node\":\"${TARGET_DEVICE}\"}'")
         else
             t_disc=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} set --delete '/interfaces/interface[name=eth1]/config/description'")
         fi
