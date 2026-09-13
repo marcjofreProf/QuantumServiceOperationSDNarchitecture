@@ -39,16 +39,13 @@ time_exec() {
 
 calc_stats() {
     python3 -c '
-import sys, math
-vals = []
-for x in sys.argv[1:]:
-    try:
-        vals.append(float(x))
-    except ValueError:
-        pass
+import sys, math, re
+
+raw_input = " ".join(sys.argv[1:])
+vals = [float(n) for n in re.findall(r"\d+\.?\d*", raw_input) if n]
 
 if not vals:
-    print("0.0|0.0|0|0")
+    print("0.0|0.0|0.0|0.0")
 else:
     avg = sum(vals) / len(vals)
     std = math.sqrt(sum((x - avg) ** 2 for x in vals) / len(vals))
@@ -120,7 +117,7 @@ run_lifecycle_benchmark() {
         echo ""
     else
         # Persistent gNMI Session via inline Python
-        read -r stat_list_gnmi <<< "$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" << 'PYEOF'
+        stat_list_gnmi="$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" << 'PYEOF'
 import sys, time
 
 target = sys.argv[1]
