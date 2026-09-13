@@ -128,7 +128,11 @@ run_lifecycle_benchmark() {
     else
         # Persistent gNMI Session via inline Python
         gnmi_raw="$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" "$INTERVAL" << 'PYEOF'
-import sys, time
+import sys, time, warnings, logging
+
+# Suppress SSL/TLS and pygnmi library warnings from leaking into output streams
+warnings.filterwarnings('ignore')
+logging.disable(logging.CRITICAL)
 
 target = sys.argv[1]
 device = sys.argv[2]
@@ -188,9 +192,12 @@ except Exception as e:
     print("FALLBACK")
 PYEOF
 )"
-        if [ "$gnmi_raw" != "FALLBACK" ] && [ -n "$gnmi_raw" ]; then
-            t_warmup="$(echo "$gnmi_raw" | cut -d'|' -f1)"
-            stat_list="$(echo "$gnmi_raw" | cut -d'|' -f2)"
+        # Extract strictly the pipe-delimited output line to protect against stray stdout
+        gnmi_line="$(echo "$gnmi_raw" | grep '|' | tail -n 1)"
+
+        if [ "$gnmi_line" != "FALLBACK" ] && [ -n "$gnmi_line" ]; then
+            t_warmup="$(echo "$gnmi_line" | cut -d'|' -f1)"
+            stat_list="$(echo "$gnmi_line" | cut -d'|' -f2)"
         else
             # Warmup read for gnmic fallback
             t_warmup=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
