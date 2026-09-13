@@ -14,6 +14,12 @@ RESULTS_FILE="/tmp/sdn_benchmark_raw.txt"
 SUMMARY_FILE="/tmp/sdn_benchmark_summary.txt"
 rm -f "$RESULTS_FILE" "$SUMMARY_FILE"
 
+# Set Python binary path to use virtual environment if available
+PYTHON_BIN="python3"
+if [ -f "./.venv/bin/python3" ]; then
+    PYTHON_BIN="./.venv/bin/python3"
+fi
+
 get_time_ms() {
     python3 -c 'import time; print(int(time.time() * 1000))'
 }
@@ -87,7 +93,7 @@ run_lifecycle_benchmark() {
         t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} set --update '/interfaces/interface[name=eth1]/config/name:::string:::eth1' --update '/interfaces/interface[name=eth1]/config/description:::string:::${service_desc}'")
     fi
     echo "${t_conn}ms"
-
+    
     # Status Iteration Phase
     if [ "$nb_proto" == "RESTCONF" ]; then
         for ((i=1; i<=ITERATIONS; i++)); do
@@ -99,7 +105,7 @@ run_lifecycle_benchmark() {
         echo ""
     else
         # Persistent gNMI Session via inline Python
-        read -r stat_list_gnmi <<< "$(python3 - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" << 'PYEOF'
+        read -r stat_list_gnmi <<< "$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" << 'PYEOF'
 import sys, time
 
 target = sys.argv[1]
@@ -112,14 +118,14 @@ try:
     gc = gNMIclient(
         target=(host, int(port)),
         skip_verify=True,
-        tls_cert_file='/etc/onos/certs/tls.crt',
-        tls_key_file='/etc/onos/certs/tls.key'
+        path_cert='/etc/onos/certs/tls.crt',
+        path_key='/etc/onos/certs/tls.key'
     )
     gc.connect()
     timings = []
     for i in range(1, iterations + 1):
         t0 = time.perf_counter()
-        _ = gc.get(path=['/interfaces/interface[name=eth1]'])
+        _ = gc.get(path=['/interfaces/interface[name=eth1]'], target=device)
         elapsed = (time.perf_counter() - t0) * 1000
         timings.append(f"{elapsed:.1f}")
         sys.stderr.write(f"\r[*] Persistent gNMI Read Iteration {i}/{iterations}... {elapsed:.1f}ms\033[K")
@@ -129,14 +135,14 @@ try:
     gc.close()
     sys.stderr.write("\n")
     print(" ".join(timings))
-except Exception:
+except Exception as e:
+    sys.stderr.write(f"\n[!] gNMI Python Exception: {e}\n")
     print("FALLBACK")
 PYEOF
 )"
         if [ "$stat_list_gnmi" != "FALLBACK" ] && [ -n "$stat_list_gnmi" ]; then
             stat_list="$stat_list_gnmi"
         else
-            # Fallback to standard CLI loop if pygnmi is missing
             for ((i=1; i<=ITERATIONS; i++)); do
                 t_stat=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
                 echo -ne "\r[*] Status Read Iteration ${i}/${ITERATIONS}... ${t_stat}ms\033[K"
