@@ -68,7 +68,7 @@ ensure_gnmi_topo_aspect() {
 run_lifecycle_benchmark() {
     local mode_id="$1" mode_name="$2" nb_proto="$3" sb_proto="$4"
     echo "=================================================================="
-    echo "  Running Benchmark Mode ${mode_id}: ${mode_name} (${ITERATIONS} Runs)"
+    echo "  Running Benchmark Mode ${mode_id}: ${mode_name} (${ITERATIONS} Status Reads)"
     echo "  Target: ${TARGET_DEVICE} (${TARGET_NODE_IP})"
     echo "=================================================================="
 
@@ -76,65 +76,48 @@ run_lifecycle_benchmark() {
         ensure_gnmi_topo_aspect
     fi
 
-    local conn_list="" stat1_list="" disc_list="" stat2_list="" total_list=""
+    local stat_list=""
+    local service_desc="qservice-m${mode_id}-${sb_proto}"
 
+    # Connect Phase (Executed Once)
+    echo -n "[*] Connecting... "
+    if [ "$nb_proto" == "RESTCONF" ]; then
+        t_conn=$(time_exec "curl -s -X POST '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node\":\"${TARGET_DEVICE}\",\"target-node-ip\":\"${TARGET_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\",\"name\":\"eth1\",\"description\":\"${service_desc}\"}'")
+    else
+        t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} set --update '/interfaces/interface[name=eth1]/config/name:::string:::eth1' --update '/interfaces/interface[name=eth1]/config/description:::string:::${service_desc}'")
+    fi
+    echo "${t_conn}ms"
+
+    # Status Iteration Phase
     for ((i=1; i<=ITERATIONS; i++)); do
-        echo -n "[*] Iteration ${i}/${ITERATIONS}... "
-
-        # Define description string cleanly outside the command
-        local service_desc="qservice-m${mode_id}-${sb_proto}"
-
-        # Connect Phase
+        echo -n "[*] Status Read Iteration ${i}/${ITERATIONS}... "
+        
         if [ "$nb_proto" == "RESTCONF" ]; then
-            t_conn=$(time_exec "curl -s -X POST '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}-i${i}\",\"target-node\":\"${TARGET_DEVICE}\",\"target-node-ip\":\"${TARGET_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\",\"name\":\"eth1\",\"description\":\"${service_desc}\"}'")
+            t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
-            t_conn=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} set --update '/interfaces/interface[name=eth1]/config/name:::string:::eth1' --update '/interfaces/interface[name=eth1]/config/description:::string:::${service_desc}'")
+            t_stat=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
         fi
         
-        # Status 1 Phase
-        if [ "$nb_proto" == "RESTCONF" ]; then
-            t_stat1=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
-        else
-            t_stat1=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
-        fi
+        echo "${t_stat}ms"
+        stat_list="${stat_list} ${t_stat}"
         
-        # Disconnect Phase
-        if [ "$nb_proto" == "RESTCONF" ]; then
-            t_disc=$(time_exec "curl -s -f -X DELETE '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node\":\"${TARGET_DEVICE}\"}'")
-        else
-            t_disc=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} set --delete '/interfaces/interface[name=eth1]/config/description'")
-        fi
-        
-        # Status 2 Phase
-        if [ "$nb_proto" == "RESTCONF" ]; then
-            t_stat2=$(time_exec "curl -s -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
-        else
-            t_stat2=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
-        fi
-
-        t_total=0
-        for val in "$t_conn" "$t_stat1" "$t_disc" "$t_stat2"; do
-            if [[ "$val" =~ ^[0-9]+$ ]]; then
-                t_total=$((t_total + val))
-            fi
-        done
-
-        echo "Connect=${t_conn}ms | Total=${t_total}ms"
-
-        conn_list="${conn_list} ${t_conn}"
-        stat1_list="${stat1_list} ${t_stat1}"
-        disc_list="${disc_list} ${t_disc}"
-        stat2_list="${stat2_list} ${t_stat2}"
-        total_list="${total_list} ${t_total}"
+        # Reasonable sleep between status queries (not counted in time_exec)
+        sleep 1
     done
 
-    IFS='|' read -r conn_avg conn_sd conn_min conn_max <<< "$(calc_stats $conn_list)"
-    IFS='|' read -r stat1_avg stat1_sd stat1_min stat1_max <<< "$(calc_stats $stat1_list)"
-    IFS='|' read -r disc_avg disc_sd disc_min disc_max <<< "$(calc_stats $disc_list)"
-    IFS='|' read -r stat2_avg stat2_sd stat2_min stat2_max <<< "$(calc_stats $stat2_list)"
-    IFS='|' read -r total_avg total_sd total_min total_max <<< "$(calc_stats $total_list)"
+    # Disconnect Phase (Executed Once)
+    echo -n "[*] Disconnecting... "
+    if [ "$nb_proto" == "RESTCONF" ]; then
+        t_disc=$(time_exec "curl -s -f -X DELETE '${RESTCONF_GW_URL}' -H 'Content-Type: application/json' -H 'X-Southbound-Target: ${sb_proto}' -d '{\"service-id\":\"qservice-m${mode_id}\",\"target-node\":\"${TARGET_DEVICE}\"}'")
+    else
+        t_disc=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} set --delete '/interfaces/interface[name=eth1]/config/description'")
+    fi
+    echo "${t_disc}ms"
 
-    echo "${mode_id}|${mode_name}|${conn_avg}±${conn_sd}|${stat1_avg}±${stat1_sd}|${disc_avg}±${disc_sd}|${stat2_avg}±${stat2_sd}|${total_avg}±${total_sd}|[${total_min}-${total_max}]" >> "$SUMMARY_FILE"
+    # Calculate statistics for the looped status reads
+    IFS='|' read -r stat_avg stat_sd stat_min stat_max <<< "$(calc_stats $stat_list)"
+
+    echo "${mode_id}|${mode_name}|${t_conn}|${stat_avg}±${stat_sd}|${t_disc}|[${stat_min}-${stat_max}]" >> "$SUMMARY_FILE"
     echo ""
 }
 
@@ -148,13 +131,13 @@ run_lifecycle_benchmark "4" "gNMI -> gNOI"        "gNMI"     "gNOI"
 run_lifecycle_benchmark "5" "gNMI -> gNMI"        "gNMI"     "gNMI"
 run_lifecycle_benchmark "6" "RESTCONF -> gNMI"    "RESTCONF" "gNMI"
 
-echo "========================================================================================================================="
-echo "                                SDN PROTOCOL BENCHMARK STATISTICAL SUMMARY (${ITERATIONS} Runs)                             "
-echo "========================================================================================================================="
-printf "%-7s | %-20s | %-12s | %-12s | %-12s | %-12s | %-14s | %-12s\n" "Mode" "Path" "Connect (ms)" "Status-1(ms)" "Disc. (ms)" "Status-2(ms)" "Total (ms)" "Range (ms)"
-echo "-------------------------------------------------------------------------------------------------------------------------"
+echo "=========================================================================================================="
+echo "                           SDN PROTOCOL BENCHMARK STATISTICAL SUMMARY (${ITERATIONS} Status Reads)        "
+echo "=========================================================================================================="
+printf "%-7s | %-20s | %-12s | %-16s | %-12s | %-12s\n" "Mode" "Path" "Connect (ms)" "Status Avg (ms)" "Disc. (ms)" "Stat Range(ms)"
+echo "----------------------------------------------------------------------------------------------------------"
 
-while IFS='|' read -r mid mname tc ts1 td ts2 tt tr; do
-    printf "%-7s | %-20s | %-12s | %-12s | %-12s | %-12s | %-14s | %-12s\n" "Mode ${mid}" "${mname}" "${tc}" "${ts1}" "${td}" "${ts2}" "${tt}" "${tr}"
+while IFS='|' read -r mid mname tc ts_stats td tr; do
+    printf "%-7s | %-20s | %-12s | %-16s | %-12s | %-12s\n" "Mode ${mid}" "${mname}" "${tc}" "${ts_stats}" "${td}" "${tr}"
 done < "$SUMMARY_FILE"
-echo "========================================================================================================================="
+echo "=========================================================================================================="
