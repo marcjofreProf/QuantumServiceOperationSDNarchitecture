@@ -112,11 +112,11 @@ run_lifecycle_benchmark() {
             t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
             echo -ne "\r[*] Status Read Iteration ${i}/${ITERATIONS}... ${t_stat}ms\033[K"
             stat_list="${stat_list} ${t_stat}"
-            sleep 1
+            sleep 0.5
         done
         echo ""
     else
-        INTERVAL=${INTERVAL:-0.2}  # Default 0.2s, override via INTERVAL env var
+        INTERVAL=${INTERVAL:-0.5}  # Default 0.5s, override via INTERVAL env var
 
         # Persistent gNMI Session via inline Python
         stat_list_gnmi="$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" "$INTERVAL" << 'PYEOF'
