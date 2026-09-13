@@ -32,7 +32,7 @@ time_exec() {
 }
 
 calc_stats() {
-    python3 -c 'import sys, math; vals = [float(x) for x in sys.argv[1:] if x.isdigit()]; print("0.0|0.0|0|0") if not vals else print(f"{sum(vals)/len(vals):.1f}|{math.sqrt(sum((x - sum(vals)/len(vals))**2 for x in vals)/len(vals)):.1f}|{int(min(vals))}|{int(max(vals))}")' "$@"
+    python3 -c 'import sys, math; vals = [float(x) for x in sys.argv[1:] if x.isdigit() or x.replace(".", "", 1).isdigit()]; print("0.0|0.0|0|0") if not vals else print(f"{sum(vals)/len(vals):.1f}|{math.sqrt(sum((x - sum(vals)/len(vals))**2 for x in vals)/len(vals)):.1f}|{int(min(vals))}|{int(max(vals))}")' "$@"
 }
 
 ensure_gnmi_topo_aspect() {
@@ -89,21 +89,64 @@ run_lifecycle_benchmark() {
     echo "${t_conn}ms"
 
     # Status Iteration Phase
-    for ((i=1; i<=ITERATIONS; i++)); do        
-        if [ "$nb_proto" == "RESTCONF" ]; then
+    if [ "$nb_proto" == "RESTCONF" ]; then
+        for ((i=1; i<=ITERATIONS; i++)); do
             t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
+            echo -ne "\r[*] Status Read Iteration ${i}/${ITERATIONS}... ${t_stat}ms\033[K"
+            stat_list="${stat_list} ${t_stat}"
+            sleep 1
+        done
+        echo ""
+    else
+        # Persistent gNMI Session via inline Python
+        read -r stat_list_gnmi <<< "$(python3 - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" << 'PYEOF'
+import sys, time
+
+target = sys.argv[1]
+device = sys.argv[2]
+iterations = int(sys.argv[3])
+host, port = target.split(':') if ':' in target else (target, '5150')
+
+try:
+    from pygnmi.client import gNMIclient
+    gc = gNMIclient(
+        target=(host, int(port)),
+        skip_verify=True,
+        tls_cert_file='/etc/onos/certs/tls.crt',
+        tls_key_file='/etc/onos/certs/tls.key'
+    )
+    gc.connect()
+    timings = []
+    for i in range(1, iterations + 1):
+        t0 = time.perf_counter()
+        _ = gc.get(path=['/interfaces/interface[name=eth1]'])
+        elapsed = (time.perf_counter() - t0) * 1000
+        timings.append(f"{elapsed:.1f}")
+        sys.stderr.write(f"\r[*] Persistent gNMI Read Iteration {i}/{iterations}... {elapsed:.1f}ms\033[K")
+        sys.stderr.flush()
+        if i < iterations:
+            time.sleep(1)
+    gc.close()
+    sys.stderr.write("\n")
+    print(" ".join(timings))
+except Exception:
+    print("FALLBACK")
+PYEOF
+)"
+        if [ "$stat_list_gnmi" != "FALLBACK" ] && [ -n "$stat_list_gnmi" ]; then
+            stat_list="$stat_list_gnmi"
         else
-            t_stat=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
+            # Fallback to standard CLI loop if pygnmi is missing
+            for ((i=1; i<=ITERATIONS; i++)); do
+                t_stat=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
+                echo -ne "\r[*] Status Read Iteration ${i}/${ITERATIONS}... ${t_stat}ms\033[K"
+                stat_list="${stat_list} ${t_stat}"
+                sleep 1
+            done
+            echo ""
         fi
-        
-        echo -ne "\r[*] Status Read Iteration ${i}/${ITERATIONS}... ${t_stat}ms\033[K"
-        stat_list="${stat_list} ${t_stat}"
-        
-        # Reasonable sleep between status queries (not counted in time_exec)
-        sleep 1
-    done
-    echo "" # Move to a fresh line when status iterations complete
-    
+    fi
+
     # Disconnect Phase (Executed Once)
     echo -n "[*] Disconnecting... "
     if [ "$nb_proto" == "RESTCONF" ]; then
@@ -125,8 +168,6 @@ run_lifecycle_benchmark "1" "RESTCONF -> NETCONF" "RESTCONF" "NETCONF"
 run_lifecycle_benchmark "2" "RESTCONF -> gNOI"    "RESTCONF" "gNOI"
 run_lifecycle_benchmark "3" "gNMI -> NETCONF"     "gNMI"     "NETCONF"
 run_lifecycle_benchmark "4" "gNMI -> gNOI"        "gNMI"     "gNOI"
-
-# Native gNMI Baseline Modes
 run_lifecycle_benchmark "5" "gNMI -> gNMI"        "gNMI"     "gNMI"
 run_lifecycle_benchmark "6" "RESTCONF -> gNMI"    "RESTCONF" "gNMI"
 
