@@ -119,7 +119,8 @@ try:
         target=(host, int(port)),
         skip_verify=True,
         path_cert='/etc/onos/certs/tls.crt',
-        path_key='/etc/onos/certs/tls.key'
+        path_key='/etc/onos/certs/tls.key',
+        path_root='/etc/onos/certs/tls.crt'
     )
     gc.connect()
     timings = []
