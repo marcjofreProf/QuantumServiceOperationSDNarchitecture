@@ -95,6 +95,7 @@ run_lifecycle_benchmark() {
     fi
 
     local stat_list=""
+    local t_warmup="0"
     local service_desc="qservice-m${mode_id}-${sb_proto}"
 
     # Connect Phase (Executed Once)
@@ -107,25 +108,32 @@ run_lifecycle_benchmark() {
     echo "${t_conn}ms"
     
     # Status Iteration Phase
+    INTERVAL=${INTERVAL:-0.5}  # Default 0.5s, override via INTERVAL env var
+
     if [ "$nb_proto" == "RESTCONF" ]; then
+        # Warmup read (measured and recorded)
+        t_warmup=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
+        echo "[*] Warm-up Read... ${t_warmup}ms"
+
         for ((i=1; i<=ITERATIONS; i++)); do
             t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
-            echo -ne "\r[*] Status Read Iteration ${i}/${ITERATIONS}... ${t_stat}ms\033[K"
             stat_list="${stat_list} ${t_stat}"
-            sleep 0.5
+            
+            running_avg=$(python3 -c "vals=[float(x) for x in '${stat_list}'.split() if x]; print(f'{sum(vals)/len(vals):.1f}')" 2>/dev/null || echo "$t_stat")
+            echo -ne "\r[*] Status Read Iteration ${i}/${ITERATIONS}... ${t_stat}ms (Avg: ${running_avg}ms)\033[K"
+            
+            sleep "$INTERVAL"
         done
         echo ""
     else
-        INTERVAL=${INTERVAL:-0.5}  # Default 0.5s, override via INTERVAL env var
-
         # Persistent gNMI Session via inline Python
-        stat_list_gnmi="$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" "$INTERVAL" << 'PYEOF'
+        gnmi_raw="$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" "$INTERVAL" << 'PYEOF'
 import sys, time
 
 target = sys.argv[1]
 device = sys.argv[2]
 iterations = int(sys.argv[3])
-interval = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
+interval = float(sys.argv[4]) if len(sys.argv) > 4 else 0.5
 host, port = target.split(':') if ':' in target else (target, '5150')
 
 try:
@@ -138,6 +146,18 @@ try:
         path_root='/etc/onos/certs/tls.crt'
     )
     gc.connect()
+
+    # Warmup read (measured and recorded)
+    t_w0 = time.perf_counter()
+    try:
+        _ = gc.get(path=['/interfaces/interface[name=eth1]'], target=device)
+        warmup_ms = (time.perf_counter() - t_w0) * 1000
+    except Exception:
+        warmup_ms = 0.0
+        
+    sys.stderr.write(f"[*] Warm-up Read... {warmup_ms:.1f}ms\n")
+    sys.stderr.flush()
+
     timings = []
     
     for i in range(1, iterations + 1):
@@ -147,34 +167,43 @@ try:
             _ = gc.get(path=['/interfaces/interface[name=eth1]'], target=device)
             elapsed = (time.perf_counter() - t_start) * 1000
             timings.append(f"{elapsed:.1f}")
-            sys.stderr.write(f"\r[*] Persistent gNMI Read Iteration {i}/{iterations}... {elapsed:.1f}ms\033[K")
+            
+            running_avg = sum(float(x) for x in timings) / len(timings)
+            sys.stderr.write(f"\r[*] Persistent gNMI Read Iteration {i}/{iterations}... {elapsed:.1f}ms (Avg: {running_avg:.1f}ms)\033[K")
         except Exception as req_err:
             sys.stderr.write(f"\n[!] Read error on iteration {i}: {req_err}\n")
             
         sys.stderr.flush()
         
         if i < iterations:
-            # Paced sleep: adjust delay to account for execution time
             work_duration = time.perf_counter() - t_start
             sleep_time = max(0.0, interval - work_duration)
             time.sleep(sleep_time)
 
     gc.close()
     sys.stderr.write("\n")
-    print(" ".join(timings))
+    print(f"{warmup_ms:.1f}|" + " ".join(timings))
 except Exception as e:
     sys.stderr.write(f"\n[!] gNMI Python Fatal Exception: {e}\n")
     print("FALLBACK")
 PYEOF
 )"
-        if [ "$stat_list_gnmi" != "FALLBACK" ] && [ -n "$stat_list_gnmi" ]; then
-            stat_list="$stat_list_gnmi"
+        if [ "$gnmi_raw" != "FALLBACK" ] && [ -n "$gnmi_raw" ]; then
+            t_warmup="$(echo "$gnmi_raw" | cut -d'|' -f1)"
+            stat_list="$(echo "$gnmi_raw" | cut -d'|' -f2)"
         else
+            # Warmup read for gnmic fallback
+            t_warmup=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
+            echo "[*] Warm-up Read... ${t_warmup}ms"
+
             for ((i=1; i<=ITERATIONS; i++)); do
                 t_stat=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
-                echo -ne "\r[*] Status Read Iteration ${i}/${ITERATIONS}... ${t_stat}ms\033[K"
                 stat_list="${stat_list} ${t_stat}"
-                sleep 1
+                
+                running_avg=$(python3 -c "vals=[float(x) for x in '${stat_list}'.split() if x]; print(f'{sum(vals)/len(vals):.1f}')" 2>/dev/null || echo "$t_stat")
+                echo -ne "\r[*] Status Read Iteration ${i}/${ITERATIONS}... ${t_stat}ms (Avg: ${running_avg}ms)\033[K"
+                
+                sleep "$INTERVAL"
             done
             echo ""
         fi
@@ -192,7 +221,7 @@ PYEOF
     # Calculate statistics for the looped status reads
     IFS='|' read -r stat_avg stat_sd stat_min stat_max <<< "$(calc_stats $stat_list)"
 
-    echo "${mode_id}|${mode_name}|${t_conn}|${stat_avg}±${stat_sd}|${t_disc}|[${stat_min}-${stat_max}]" >> "$SUMMARY_FILE"
+    echo "${mode_id}|${mode_name}|${t_conn}|${t_warmup}|${stat_avg}±${stat_sd}|${t_disc}|[${stat_min}-${stat_max}]" >> "$SUMMARY_FILE"
     echo ""
 }
 
@@ -204,13 +233,13 @@ run_lifecycle_benchmark "4" "gNMI -> gNOI"        "gNMI"     "gNOI"
 run_lifecycle_benchmark "5" "gNMI -> gNMI"        "gNMI"     "gNMI"
 run_lifecycle_benchmark "6" "RESTCONF -> gNMI"    "RESTCONF" "gNMI"
 
-echo "=========================================================================================================="
-echo "                           SDN PROTOCOL BENCHMARK STATISTICAL SUMMARY (${ITERATIONS} Status Reads)        "
-echo "=========================================================================================================="
-printf "%-7s | %-20s | %-12s | %-16s | %-12s | %-12s\n" "Mode" "Path" "Connect (ms)" "Status Avg (ms)" "Disc. (ms)" "Stat Range(ms)"
-echo "----------------------------------------------------------------------------------------------------------"
+echo "===================================================================================================================="
+echo "                               SDN PROTOCOL BENCHMARK STATISTICAL SUMMARY (${ITERATIONS} Status Reads)             "
+echo "===================================================================================================================="
+printf "%-7s | %-20s | %-12s | %-12s | %-16s | %-10s | %-12s\n" "Mode" "Path" "Connect(ms)" "Warmup(ms)" "Status Avg (ms)" "Disc.(ms)" "Stat Range(ms)"
+echo "--------------------------------------------------------------------------------------------------------------------"
 
-while IFS='|' read -r mid mname tc ts_stats td tr; do
-    printf "%-7s | %-20s | %-12s | %-16s | %-12s | %-12s\n" "Mode ${mid}" "${mname}" "${tc}" "${ts_stats}" "${td}" "${tr}"
+while IFS='|' read -r mid mname tc tw ts_stats td tr; do
+    printf "%-7s | %-20s | %-12s | %-12s | %-16s | %-10s | %-12s\n" "Mode ${mid}" "${mname}" "${tc}" "${tw}" "${ts_stats}" "${td}" "${tr}"
 done < "$SUMMARY_FILE"
-echo "=========================================================================================================="
+echo "===================================================================================================================="
