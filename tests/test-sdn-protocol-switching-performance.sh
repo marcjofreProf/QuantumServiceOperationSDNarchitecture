@@ -116,13 +116,16 @@ run_lifecycle_benchmark() {
         done
         echo ""
     else
+        INTERVAL=${INTERVAL:-0.2}  # Default 0.2s, override via INTERVAL env var
+
         # Persistent gNMI Session via inline Python
-        stat_list_gnmi="$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" << 'PYEOF'
+        stat_list_gnmi="$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$ITERATIONS" "$INTERVAL" << 'PYEOF'
 import sys, time
 
 target = sys.argv[1]
 device = sys.argv[2]
 iterations = int(sys.argv[3])
+interval = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
 host, port = target.split(':') if ':' in target else (target, '5150')
 
 try:
@@ -136,20 +139,31 @@ try:
     )
     gc.connect()
     timings = []
+    
     for i in range(1, iterations + 1):
-        t0 = time.perf_counter()
-        _ = gc.get(path=['/interfaces/interface[name=eth1]'], target=device)
-        elapsed = (time.perf_counter() - t0) * 1000
-        timings.append(f"{elapsed:.1f}")
-        sys.stderr.write(f"\r[*] Persistent gNMI Read Iteration {i}/{iterations}... {elapsed:.1f}ms\033[K")
+        t_start = time.perf_counter()
+        
+        try:
+            _ = gc.get(path=['/interfaces/interface[name=eth1]'], target=device)
+            elapsed = (time.perf_counter() - t_start) * 1000
+            timings.append(f"{elapsed:.1f}")
+            sys.stderr.write(f"\r[*] Persistent gNMI Read Iteration {i}/{iterations}... {elapsed:.1f}ms\033[K")
+        except Exception as req_err:
+            sys.stderr.write(f"\n[!] Read error on iteration {i}: {req_err}\n")
+            
         sys.stderr.flush()
+        
         if i < iterations:
-            time.sleep(1)
+            # Paced sleep: adjust delay to account for execution time
+            work_duration = time.perf_counter() - t_start
+            sleep_time = max(0.0, interval - work_duration)
+            time.sleep(sleep_time)
+
     gc.close()
     sys.stderr.write("\n")
     print(" ".join(timings))
 except Exception as e:
-    sys.stderr.write(f"\n[!] gNMI Python Exception: {e}\n")
+    sys.stderr.write(f"\n[!] gNMI Python Fatal Exception: {e}\n")
     print("FALLBACK")
 PYEOF
 )"
