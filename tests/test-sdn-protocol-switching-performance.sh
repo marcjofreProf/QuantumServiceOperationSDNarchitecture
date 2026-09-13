@@ -38,7 +38,22 @@ time_exec() {
 }
 
 calc_stats() {
-    python3 -c 'import sys, math; vals = [float(x) for x in sys.argv[1:] if x.isdigit() or x.replace(".", "", 1).isdigit()]; print("0.0|0.0|0|0") if not vals else print(f"{sum(vals)/len(vals):.1f}|{math.sqrt(sum((x - sum(vals)/len(vals))**2 for x in vals)/len(vals)):.1f}|{int(min(vals))}|{int(max(vals))}")' "$@"
+    python3 -c '
+import sys, math
+vals = []
+for x in sys.argv[1:]:
+    try:
+        vals.append(float(x))
+    except ValueError:
+        pass
+
+if not vals:
+    print("0.0|0.0|0|0")
+else:
+    avg = sum(vals) / len(vals)
+    std = math.sqrt(sum((x - avg) ** 2 for x in vals) / len(vals))
+    print(f"{avg:.1f}|{std:.1f}|{min(vals):.1f}|{max(vals):.1f}")
+' "$@"
 }
 
 ensure_gnmi_topo_aspect() {
