@@ -89,22 +89,21 @@ run_lifecycle_benchmark() {
     echo "${t_conn}ms"
 
     # Status Iteration Phase
-    for ((i=1; i<=ITERATIONS; i++)); do
-        echo -n "[*] Status Read Iteration ${i}/${ITERATIONS}... "
-        
+    for ((i=1; i<=ITERATIONS; i++)); do        
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
             t_stat=$(time_exec "gnmic -a ${ONOS_GNMI_TARGET} --tls-cert /etc/onos/certs/tls.crt --tls-key /etc/onos/certs/tls.key --skip-verify --timeout 5s --target ${TARGET_DEVICE} get --path '/interfaces/interface[name=eth1]'")
         fi
         
-        echo "${t_stat}ms"
+        echo -ne "\r[*] Status Read Iteration ${i}/${ITERATIONS}... ${t_stat}ms\033[K"
         stat_list="${stat_list} ${t_stat}"
         
         # Reasonable sleep between status queries (not counted in time_exec)
         sleep 1
     done
-
+    echo "" # Move to a fresh line when status iterations complete
+    
     # Disconnect Phase (Executed Once)
     echo -n "[*] Disconnecting... "
     if [ "$nb_proto" == "RESTCONF" ]; then
