@@ -376,6 +376,7 @@ else
         grpcio \
         grpcio-tools \
         pyang \
+        pygnmi \
         gnoi-client \
         onos-api \
         ops \
