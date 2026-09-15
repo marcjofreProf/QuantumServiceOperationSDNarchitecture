@@ -72,15 +72,15 @@ exec_connect() {
             -H 'X-Southbound-Target: ${sb_proto}' \
             -d '{\"service-id\":\"${service_id}\",\"target-node\":\"${TARGET_DEVICE}\",\"target-node-ip\":\"${PAYLOAD_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\",\"name\":\"eth1\",\"description\":\"${service_desc}\"}'"
     else
-        # Persistent gNMI Set via Python pygnmi
+        # gNMI Set via Python pygnmi with JSON-marshaled value
         $PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$service_desc" << 'PYEOF'
-import sys, time, warnings, logging
+import sys, time, json, warnings, logging
 warnings.filterwarnings('ignore')
 logging.disable(logging.CRITICAL)
 
 target = sys.argv[1]
 device = sys.argv[2]
-val = sys.argv[3]
+raw_val = sys.argv[3]
 host, port = target.split(':') if ':' in target else (target, '5150')
 
 try:
@@ -94,7 +94,8 @@ try:
     )
     gc.connect()
     t0 = time.perf_counter()
-    gc.set(update=[('/interfaces/interface[name=eth1]/config/description', str(val))], target=device)
+    # Format value as JSON string expected by ONOS
+    gc.set(update=[('/interfaces/interface[name=eth1]/config/description', json.dumps(raw_val))], target=device)
     elapsed = (time.perf_counter() - t0) * 1000
     gc.close()
     print(f"{int(elapsed)}")
@@ -114,15 +115,15 @@ exec_disconnect() {
             -H 'X-Southbound-Target: ${sb_proto}' \
             -d '{\"service-id\":\"${service_id}\",\"target-node\":\"${TARGET_DEVICE}\"}'"
     else
-        # Persistent gNMI Set via Python pygnmi
+        # gNMI Set via Python pygnmi with JSON-marshaled value
         $PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "disabled" << 'PYEOF'
-import sys, time, warnings, logging
+import sys, time, json, warnings, logging
 warnings.filterwarnings('ignore')
 logging.disable(logging.CRITICAL)
 
 target = sys.argv[1]
 device = sys.argv[2]
-val = sys.argv[3]
+raw_val = sys.argv[3]
 host, port = target.split(':') if ':' in target else (target, '5150')
 
 try:
@@ -136,7 +137,8 @@ try:
     )
     gc.connect()
     t0 = time.perf_counter()
-    gc.set(update=[('/interfaces/interface[name=eth1]/config/description', str(val))], target=device)
+    # Format value as JSON string expected by ONOS
+    gc.set(update=[('/interfaces/interface[name=eth1]/config/description', json.dumps(raw_val))], target=device)
     elapsed = (time.perf_counter() - t0) * 1000
     gc.close()
     print(f"{int(elapsed)}")
@@ -195,7 +197,7 @@ PYEOF
         # Connect Phase
         t_conn=$(exec_connect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
 
-        # Status Read Phase (RESTCONF or Persistent gNMI Session)
+        # Status Read Phase
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
