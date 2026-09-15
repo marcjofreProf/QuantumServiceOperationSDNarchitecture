@@ -8,12 +8,15 @@ TARGET_NODE_IP="${TARGET_NODE_IP:-10.0.0.254}"
 INTERVAL="${INTERVAL:-0.5}"
 
 CONTROLLER_HOST="10.0.0.2"
-RESTCONF_GW_URL="${RESTCONF_GW_URL:-http://localhost:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service}"
+RESTCONF_GW_URL="${RESTCONF_GW_URL:-http://127.0.0.1:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service}"
 ONOS_GNMI_TARGET="${CONTROLLER_HOST}:5150"
 
 RESULTS_FILE="/tmp/sdn_benchmark_raw.txt"
 SUMMARY_FILE="/tmp/sdn_benchmark_summary.txt"
-rm -f "$RESULTS_FILE" "$SUMMARY_FILE"
+FIFO_IN="/tmp/gnmi_daemon_in"
+FIFO_OUT="/tmp/gnmi_daemon_out"
+
+rm -f "$RESULTS_FILE" "$SUMMARY_FILE" "$FIFO_IN" "$FIFO_OUT"
 
 # Python binary path setup
 PYTHON_BIN="python3"
@@ -21,10 +24,12 @@ if [ -f "./.venv/bin/python3" ]; then
     PYTHON_BIN="./.venv/bin/python3"
 fi
 
-# Ensure valid IP format for RESTCONF JSON payloads
+# Map non-IP hostnames to prevent 5s DNS timeouts in ONOS backend
 PAYLOAD_NODE_IP="${TARGET_NODE_IP}"
+PAYLOAD_TARGET_DEVICE="${TARGET_DEVICE}"
 if [[ "$PAYLOAD_NODE_IP" == "quantum-node-1" || ! "$PAYLOAD_NODE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     PAYLOAD_NODE_IP="10.0.0.254"
+    PAYLOAD_TARGET_DEVICE="10.0.0.254"
 fi
 
 get_time_ms() {
@@ -60,6 +65,121 @@ else:
 ' "$@"
 }
 
+# --- PERSISTENT gNMI DAEMON ---
+
+start_gnmi_daemon() {
+    mkfifo "$FIFO_IN" "$FIFO_OUT"
+    $PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" < "$FIFO_IN" > "$FIFO_OUT" 2>/dev/null &
+    GNMI_DAEMON_PID=$!
+
+    # Initialize persistent gNMI gRPC session
+    exec 3> "$FIFO_IN"
+    exec 4< "$FIFO_OUT"
+}
+
+stop_gnmi_daemon() {
+    if [ -n "$GNMI_DAEMON_PID" ]; then
+        echo "QUIT" >&3 2>/dev/null || true
+        exec 3>&- 2>/dev/null || true
+        exec 4<&- 2>/dev/null || true
+        rm -f "$FIFO_IN" "$FIFO_OUT"
+    fi
+}
+trap stop_gnmi_daemon EXIT
+
+# Launch persistent Python daemon process
+$PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" << 'PYEOF' &
+import sys, time, warnings, logging
+warnings.filterwarnings('ignore')
+logging.disable(logging.CRITICAL)
+
+target = sys.argv[1]
+device = sys.argv[2]
+host, port = target.split(':') if ':' in target else (target, '5150')
+
+gc = None
+try:
+    from pygnmi.client import gNMIclient
+    gc = gNMIclient(
+        target=(host, int(port)),
+        skip_verify=True,
+        path_cert='/etc/onos/certs/tls.crt',
+        path_key='/etc/onos/certs/tls.key',
+        path_root='/etc/onos/certs/tls.crt'
+    )
+    gc.connect()
+except Exception as e:
+    pass
+
+while True:
+    line = sys.stdin.readline()
+    if not line or 'QUIT' in line:
+        break
+    
+    parts = line.strip().split('|')
+    action = parts[0]
+    
+    if not gc:
+        print("FAILED")
+        sys.stdout.flush()
+        continue
+
+    try:
+        t0 = time.perf_counter()
+        if action == "SET":
+            val = parts[1]
+            paths = [
+                '/openconfig-interfaces:interfaces/interface[name=eth1]/config/description',
+                '/interfaces/interface[name=eth1]/config/description'
+            ]
+            success = False
+            for p in paths:
+                try:
+                    gc.set(update=[(p, str(val))], target=device)
+                    success = True
+                    break
+                except Exception:
+                    continue
+            if not success:
+                raise Exception("gNMI Set path match failed")
+
+        elif action == "GET":
+            gc.get(path=['/openconfig-interfaces:interfaces/interface[name=eth1]'], target=device)
+        
+        elapsed = int((time.perf_counter() - t0) * 1000)
+        print(f"{elapsed}")
+    except Exception as e:
+        print("FAILED")
+    sys.stdout.flush()
+
+if gc:
+    try: gc.close()
+    except Exception: pass
+PYEOF
+
+GNMI_DAEMON_PID=$!
+sleep 1
+
+exec_gnmi_op() {
+    local op_type="$1" val_arg="$2"
+    if ! kill -0 "$GNMI_DAEMON_PID" 2>/dev/null; then
+        echo "FAILED"
+        return
+    fi
+    echo "${op_type}|${val_arg}" > "$FIFO_IN"
+    local res
+    read -r res < "$FIFO_OUT" || res="FAILED"
+    echo "$res"
+}
+
+# Verification check for persistent connection
+check_step() {
+    local step_name="$1" result="$2"
+    if [ "$result" == "FAILED" ]; then
+        sys.stderr.write("Warning: ${step_name} failed.\n") 2>/dev/null || true
+    fi
+}
+
 # --- PROTOCOL HELPERS ---
 
 exec_connect() {
@@ -70,39 +190,9 @@ exec_connect() {
         time_exec "curl -s -X POST '${RESTCONF_GW_URL}' \
             -H 'Content-Type: application/json' \
             -H 'X-Southbound-Target: ${sb_proto}' \
-            -d '{\"service-id\":\"${service_id}\",\"target-node\":\"${TARGET_DEVICE}\",\"target-node-ip\":\"${PAYLOAD_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\",\"name\":\"eth1\",\"description\":\"${service_desc}\"}'"
+            -d '{\"service-id\":\"${service_id}\",\"target-node\":\"${PAYLOAD_TARGET_DEVICE}\",\"target-node-ip\":\"${PAYLOAD_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\",\"name\":\"eth1\",\"description\":\"${service_desc}\"}'"
     else
-        # gNMI Set via Python pygnmi with JSON-marshaled value
-        $PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$service_desc" << 'PYEOF'
-import sys, time, json, warnings, logging
-warnings.filterwarnings('ignore')
-logging.disable(logging.CRITICAL)
-
-target = sys.argv[1]
-device = sys.argv[2]
-raw_val = sys.argv[3]
-host, port = target.split(':') if ':' in target else (target, '5150')
-
-try:
-    from pygnmi.client import gNMIclient
-    gc = gNMIclient(
-        target=(host, int(port)),
-        skip_verify=True,
-        path_cert='/etc/onos/certs/tls.crt',
-        path_key='/etc/onos/certs/tls.key',
-        path_root='/etc/onos/certs/tls.crt'
-    )
-    gc.connect()
-    t0 = time.perf_counter()
-    # Format value as JSON string expected by ONOS
-    gc.set(update=[('/interfaces/interface[name=eth1]/config/description', json.dumps(raw_val))], target=device)
-    elapsed = (time.perf_counter() - t0) * 1000
-    gc.close()
-    print(f"{int(elapsed)}")
-except Exception as e:
-    sys.stderr.write(f"gNMI Connect Error: {e}\n")
-    print("FAILED")
-PYEOF
+        exec_gnmi_op "SET" "$service_desc"
     fi
 }
 
@@ -113,39 +203,9 @@ exec_disconnect() {
         time_exec "curl -s -f -X DELETE '${RESTCONF_GW_URL}' \
             -H 'Content-Type: application/json' \
             -H 'X-Southbound-Target: ${sb_proto}' \
-            -d '{\"service-id\":\"${service_id}\",\"target-node\":\"${TARGET_DEVICE}\"}'"
+            -d '{\"service-id\":\"${service_id}\",\"target-node\":\"${PAYLOAD_TARGET_DEVICE}\"}'"
     else
-        # gNMI Set via Python pygnmi with JSON-marshaled value
-        $PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "disabled" << 'PYEOF'
-import sys, time, json, warnings, logging
-warnings.filterwarnings('ignore')
-logging.disable(logging.CRITICAL)
-
-target = sys.argv[1]
-device = sys.argv[2]
-raw_val = sys.argv[3]
-host, port = target.split(':') if ':' in target else (target, '5150')
-
-try:
-    from pygnmi.client import gNMIclient
-    gc = gNMIclient(
-        target=(host, int(port)),
-        skip_verify=True,
-        path_cert='/etc/onos/certs/tls.crt',
-        path_key='/etc/onos/certs/tls.key',
-        path_root='/etc/onos/certs/tls.crt'
-    )
-    gc.connect()
-    t0 = time.perf_counter()
-    # Format value as JSON string expected by ONOS
-    gc.set(update=[('/interfaces/interface[name=eth1]/config/description', json.dumps(raw_val))], target=device)
-    elapsed = (time.perf_counter() - t0) * 1000
-    gc.close()
-    print(f"{int(elapsed)}")
-except Exception as e:
-    sys.stderr.write(f"gNMI Disconnect Error: {e}\n")
-    print("FAILED")
-PYEOF
+        exec_gnmi_op "SET" "disabled"
     fi
 }
 
@@ -159,32 +219,17 @@ run_lifecycle_benchmark() {
     # 1. Unmeasured Pre-Warmup Run
     echo -n "[*] Pre-Warmup Lifecycle Run... "
     wp_conn=$(exec_connect "$mode_id" "$nb_proto" "$sb_proto" "warmup")
+    check_step "Warmup Connect" "$wp_conn"
     
     if [ "$nb_proto" == "RESTCONF" ]; then
         wp_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
     else
-        wp_stat=$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" << 'PYEOF'
-import sys, time, warnings, logging
-warnings.filterwarnings('ignore')
-logging.disable(logging.CRITICAL)
-target, device = sys.argv[1], sys.argv[2]
-host, port = target.split(':') if ':' in target else (target, '5150')
-try:
-    from pygnmi.client import gNMIclient
-    gc = gNMIclient(target=(host, int(port)), skip_verify=True, path_cert='/etc/onos/certs/tls.crt', path_key='/etc/onos/certs/tls.key', path_root='/etc/onos/certs/tls.crt')
-    gc.connect()
-    t0 = time.perf_counter()
-    gc.get(path=['/interfaces/interface[name=eth1]'], target=device)
-    elapsed = (time.perf_counter() - t0) * 1000
-    gc.close()
-    print(f"{int(elapsed)}")
-except Exception:
-    print("FAILED")
-PYEOF
-)
+        wp_stat=$(exec_gnmi_op "GET" "")
     fi
+    check_step "Warmup Status" "$wp_stat"
 
     wp_disc=$(exec_disconnect "$mode_id" "$nb_proto" "$sb_proto" "warmup")
+    check_step "Warmup Disconnect" "$wp_disc"
     echo "Done (Conn: ${wp_conn}ms | Stat: ${wp_stat}ms | Disc: ${wp_disc}ms)"
     sleep 1
 
@@ -201,35 +246,7 @@ PYEOF
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
-            t_stat=$($PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" << 'PYEOF'
-import sys, time, warnings, logging
-warnings.filterwarnings('ignore')
-logging.disable(logging.CRITICAL)
-
-target = sys.argv[1]
-device = sys.argv[2]
-host, port = target.split(':') if ':' in target else (target, '5150')
-
-try:
-    from pygnmi.client import gNMIclient
-    gc = gNMIclient(
-        target=(host, int(port)),
-        skip_verify=True,
-        path_cert='/etc/onos/certs/tls.crt',
-        path_key='/etc/onos/certs/tls.key',
-        path_root='/etc/onos/certs/tls.crt'
-    )
-    gc.connect()
-    t0 = time.perf_counter()
-    gc.get(path=['/interfaces/interface[name=eth1]'], target=device)
-    elapsed = (time.perf_counter() - t0) * 1000
-    gc.close()
-    print(f"{int(elapsed)}")
-except Exception as e:
-    sys.stderr.write(f"gNMI Status Read Error: {e}\n")
-    print("FAILED")
-PYEOF
-)
+            t_stat=$(exec_gnmi_op "GET" "")
         fi
 
         # Disconnect Phase
