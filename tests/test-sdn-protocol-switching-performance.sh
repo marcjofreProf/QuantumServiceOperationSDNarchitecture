@@ -13,8 +13,8 @@ ONOS_GNMI_TARGET="${CONTROLLER_HOST}:5150"
 
 RESULTS_FILE="/tmp/sdn_benchmark_raw.txt"
 SUMMARY_FILE="/tmp/sdn_benchmark_summary.txt"
-FIFO_IN="/tmp/gnmi_daemon_in"
-FIFO_OUT="/tmp/gnmi_daemon_out"
+FIFO_IN="/tmp/gnmi_fifo_in_$$"
+FIFO_OUT="/tmp/gnmi_fifo_out_$$"
 
 rm -f "$RESULTS_FILE" "$SUMMARY_FILE" "$FIFO_IN" "$FIFO_OUT"
 
@@ -65,29 +65,30 @@ else:
 ' "$@"
 }
 
-# --- PERSISTENT gNMI DAEMON ---
+# --- PERSISTENT gNMI DAEMON SETUP ---
 
-start_gnmi_daemon() {
-    mkfifo "$FIFO_IN" "$FIFO_OUT"
-    $PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" < "$FIFO_IN" > "$FIFO_OUT" 2>/dev/null &
-    GNMI_DAEMON_PID=$!
+mkfifo "$FIFO_IN" "$FIFO_OUT"
 
-    # Initialize persistent gNMI gRPC session
-    exec 3> "$FIFO_IN"
-    exec 4< "$FIFO_OUT"
-}
+# Start Python gNMI daemon process in background
+$PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" < "$FIFO_IN" > "$FIFO_OUT" &
+DAEMON_PID=$!
 
-stop_gnmi_daemon() {
-    if [ -n "$GNMI_DAEMON_PID" ]; then
-        echo "QUIT" >&3 2>/dev/null || true
-        exec 3>&- 2>/dev/null || true
-        exec 4<&- 2>/dev/null || true
-        rm -f "$FIFO_IN" "$FIFO_OUT"
+# Open file descriptors on the created FIFOs
+exec 3> "$FIFO_IN"
+exec 4< "$FIFO_OUT"
+
+cleanup() {
+    echo "QUIT" >&3 2>/dev/null || true
+    exec 3>&- 2>/dev/null || true
+    exec 4<&- 2>/dev/null || true
+    rm -f "$FIFO_IN" "$FIFO_OUT"
+    if [ -n "$DAEMON_PID" ]; then
+        kill "$DAEMON_PID" 2>/dev/null || true
     fi
 }
-trap stop_gnmi_daemon EXIT
+trap cleanup EXIT
 
-# Launch persistent Python daemon process
+# Python Daemon Implementation
 $PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" << 'PYEOF' &
 import sys, time, warnings, logging
 warnings.filterwarnings('ignore')
@@ -108,7 +109,7 @@ try:
         path_root='/etc/onos/certs/tls.crt'
     )
     gc.connect()
-except Exception as e:
+except Exception:
     pass
 
 while True:
@@ -127,7 +128,7 @@ while True:
     try:
         t0 = time.perf_counter()
         if action == "SET":
-            val = parts[1]
+            val = parts[1] if len(parts) > 1 else ""
             paths = [
                 '/openconfig-interfaces:interfaces/interface[name=eth1]/config/description',
                 '/interfaces/interface[name=eth1]/config/description'
@@ -148,7 +149,7 @@ while True:
         
         elapsed = int((time.perf_counter() - t0) * 1000)
         print(f"{elapsed}")
-    except Exception as e:
+    except Exception:
         print("FAILED")
     sys.stdout.flush()
 
@@ -157,26 +158,24 @@ if gc:
     except Exception: pass
 PYEOF
 
-GNMI_DAEMON_PID=$!
 sleep 1
 
 exec_gnmi_op() {
     local op_type="$1" val_arg="$2"
-    if ! kill -0 "$GNMI_DAEMON_PID" 2>/dev/null; then
+    if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
         echo "FAILED"
         return
     fi
-    echo "${op_type}|${val_arg}" > "$FIFO_IN"
+    echo "${op_type}|${val_arg}" >&3
     local res
-    read -r res < "$FIFO_OUT" || res="FAILED"
+    read -r res <&4 || res="FAILED"
     echo "$res"
 }
 
-# Verification check for persistent connection
 check_step() {
     local step_name="$1" result="$2"
     if [ "$result" == "FAILED" ]; then
-        sys.stderr.write("Warning: ${step_name} failed.\n") 2>/dev/null || true
+        echo "Warning: ${step_name} failed." >&2
     fi
 }
 
