@@ -90,9 +90,9 @@ run_lifecycle_benchmark() {
     echo "  Target: ${TARGET_DEVICE} (${TARGET_NODE_IP})"
     echo "=================================================================="
 
-    if [ "$nb_proto" == "gNMI" ] || [ "$sb_proto" == "gNMI" ]; then
-        ensure_gnmi_topo_aspect
-    fi
+    #if [ "$nb_proto" == "gNMI" ] || [ "$sb_proto" == "gNMI" ]; then
+    #    ensure_gnmi_topo_aspect
+    #fi
 
     local stat_list=""
     local t_warmup="0"
