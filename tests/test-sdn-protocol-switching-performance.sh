@@ -119,7 +119,9 @@ while True:
                     gc.set(update=[(p, str(val))], target=device)
                     success = True
                     break
-                except Exception:
+                except Exception as path_err:
+                    with open("/tmp/gnmi_debug.log", "a") as f:
+                        f.write(f"Path failed [{p}]: {path_err}\n")
                     continue
             if not success:
                 raise Exception("gNMI Set path match failed")
@@ -129,7 +131,11 @@ while True:
         
         elapsed = int((time.perf_counter() - t0) * 1000)
         print(f"{elapsed}")
-    except Exception:
+    except Exception as e:
+        with open("/tmp/gnmi_debug.log", "a") as f:
+            import traceback
+            f.write(f"Action {action} failed:\n")
+            traceback.print_exc(file=f)
         print("FAILED")
     sys.stdout.flush()
 
