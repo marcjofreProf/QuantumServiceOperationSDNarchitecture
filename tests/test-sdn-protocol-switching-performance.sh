@@ -70,7 +70,7 @@ else:
 PY_DAEMON_SCRIPT="/tmp/gnmi_daemon_$$.py"
 
 cat << 'PYEOF' > "$PY_DAEMON_SCRIPT"
-import sys, time, warnings, logging
+import sys, time, warnings, logging, json
 warnings.filterwarnings('ignore')
 logging.disable(logging.CRITICAL)
 
@@ -108,7 +108,8 @@ while True:
     try:
         t0 = time.perf_counter()
         if action == "SET":
-            val = parts[1] if len(parts) > 1 else ""
+            raw_val = parts[1] if len(parts) > 1 else ""
+            json_val = json.dumps(str(raw_val))
             paths = [
                 '/openconfig-interfaces:interfaces/interface[name=eth1]/config/description',
                 '/interfaces/interface[name=eth1]/config/description'
@@ -116,7 +117,7 @@ while True:
             success = False
             for p in paths:
                 try:
-                    gc.set(update=[(p, str(val))], target=device)
+                    gc.set(update=[(p, json_val)], target=device)
                     success = True
                     break
                 except Exception as path_err:
@@ -164,76 +165,6 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
-
-# Python Daemon Implementation
-$PYTHON_BIN - "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" << 'PYEOF' &
-import sys, time, warnings, logging
-warnings.filterwarnings('ignore')
-logging.disable(logging.CRITICAL)
-
-target = sys.argv[1]
-device = sys.argv[2]
-host, port = target.split(':') if ':' in target else (target, '5150')
-
-gc = None
-try:
-    from pygnmi.client import gNMIclient
-    gc = gNMIclient(
-        target=(host, int(port)),
-        skip_verify=True,
-        path_cert='/etc/onos/certs/tls.crt',
-        path_key='/etc/onos/certs/tls.key',
-        path_root='/etc/onos/certs/tls.crt'
-    )
-    gc.connect()
-except Exception:
-    pass
-
-while True:
-    line = sys.stdin.readline()
-    if not line or 'QUIT' in line:
-        break
-    
-    parts = line.strip().split('|')
-    action = parts[0]
-    
-    if not gc:
-        print("FAILED")
-        sys.stdout.flush()
-        continue
-
-    try:
-        t0 = time.perf_counter()
-        if action == "SET":
-            val = parts[1] if len(parts) > 1 else ""
-            paths = [
-                '/openconfig-interfaces:interfaces/interface[name=eth1]/config/description',
-                '/interfaces/interface[name=eth1]/config/description'
-            ]
-            success = False
-            for p in paths:
-                try:
-                    gc.set(update=[(p, str(val))], target=device)
-                    success = True
-                    break
-                except Exception:
-                    continue
-            if not success:
-                raise Exception("gNMI Set path match failed")
-
-        elif action == "GET":
-            gc.get(path=['/openconfig-interfaces:interfaces/interface[name=eth1]'], target=device)
-        
-        elapsed = int((time.perf_counter() - t0) * 1000)
-        print(f"{elapsed}")
-    except Exception:
-        print("FAILED")
-    sys.stdout.flush()
-
-if gc:
-    try: gc.close()
-    except Exception: pass
-PYEOF
 
 sleep 1
 
