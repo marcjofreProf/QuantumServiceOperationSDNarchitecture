@@ -78,34 +78,38 @@ def main():
 
     stub = gnmi_grpc.gNMIStub(channel)
 
-    def do_set(value):
-        # Try OpenConfig path first, then plain path.
-        paths = [
-            "/openconfig-interfaces:interfaces/interface[name=eth1]/config/description",
-            "/interfaces/interface[name=eth1]/config/description",
-        ]
-        for p in paths:
-            elems = [gnmi.PathElem(name=x) for x in p.strip("/").split("/") if x]
-            req = gnmi.SetRequest(
-                prefix=gnmi.Path(target=device),
-                update=[
-                    gnmi.Update(
-                        path=gnmi.Path(elem=elems),
-                        val=gnmi.TypedValue(string_val=value),
-                    )
-                ],
-            )
-            try:
-                stub.Set(req, timeout=15)
-                return
-            except Exception as e:
-                log(f"Set failed on [{p}]: {e}")
-                continue
-        raise Exception("gNMI Set path match failed")
+        def do_set(value):
+        # The controller-quantum-switching model plugin exposes exactly one
+        # writable leaf: /switching/state (enum: enabled | disabled).
+        # Any other path is rejected by onos-config with "not yet supported".
+        #
+        # The shell script sends an arbitrary description string for the
+        # "connect" phase and "disabled" for the "disconnect" phase. Map
+        # anything that is not "disabled" to "enabled" so both phases are
+        # valid writes.
+        enum_value = "disabled" if str(value).strip().lower() == "disabled" else "enabled"
+
+        path = "/switching/state"
+        elems = [gnmi.PathElem(name=x) for x in path.strip("/").split("/") if x]
+        req = gnmi.SetRequest(
+            prefix=gnmi.Path(target=device),
+            update=[
+                gnmi.Update(
+                    path=gnmi.Path(elem=elems),
+                    val=gnmi.TypedValue(string_val=enum_value),
+                )
+            ],
+        )
+        try:
+            stub.Set(req, timeout=15)
+        except Exception as e:
+            log(f"Set failed on [{path}]: {e}")
+            raise
 
     def do_get():
+        # Read back the same leaf the Set writes to.
         elems = [gnmi.PathElem(name=x) for x in
-                 "/openconfig-interfaces:interfaces/interface[name=eth1]".strip("/").split("/") if x]
+                 "/switching/state".strip("/").split("/") if x]
         req = gnmi.GetRequest(
             prefix=gnmi.Path(target=device),
             path=[gnmi.Path(elem=elems)],
