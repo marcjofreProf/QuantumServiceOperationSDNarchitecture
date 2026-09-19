@@ -7,7 +7,7 @@ TARGET_DEVICE="${TARGET_DEVICE:-quantum-node-1}"
 TARGET_NODE_IP="${TARGET_NODE_IP:-10.0.0.254}"
 INTERVAL="${INTERVAL:-0.5}"
 
-CONTROLLER_HOST="10.0.0.2"
+CONTROLLER_HOST="172.28.32.106"
 RESTCONF_GW_URL="${RESTCONF_GW_URL:-http://127.0.0.1:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service}"
 ONOS_GNMI_TARGET="${CONTROLLER_HOST}:5150"
 
