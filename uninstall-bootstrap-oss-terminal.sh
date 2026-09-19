@@ -225,6 +225,17 @@ do
 
 done
 
+# Remove the downloaded OpenConfig gNMI proto sources and the nested
+# extension tree that the bootstrap fetched for stub generation.
+# The tracked proto/ directory (if any) is left alone except for these
+# specific downloaded artifacts.
+echo "[*] Removing downloaded OpenConfig gNMI proto sources..."
+rm -f  "proto/gnmi.proto"            2>/dev/null || true
+rm -f  "proto/gnmi_ext.proto"        2>/dev/null || true
+rm -rf "proto/github.com"            2>/dev/null || true
+rm -rf "proto/github"                2>/dev/null || true
+rm -f  "proto/__init__.py"           2>/dev/null || true
+
 # ------------------------------------------------------------------------------
 # 11. Clean compiled YANG tree files
 # ------------------------------------------------------------------------------
