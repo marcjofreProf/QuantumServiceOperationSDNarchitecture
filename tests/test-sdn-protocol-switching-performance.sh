@@ -15,14 +15,89 @@ RESULTS_FILE="/tmp/sdn_benchmark_raw.txt"
 SUMMARY_FILE="/tmp/sdn_benchmark_summary.txt"
 FIFO_IN="/tmp/gnmi_fifo_in_$$"
 FIFO_OUT="/tmp/gnmi_fifo_out_$$"
+GNMI_DEBUG_LOG="/tmp/gnmi_debug.log"
 
-rm -f "$RESULTS_FILE" "$SUMMARY_FILE" "$FIFO_IN" "$FIFO_OUT"
+rm -f "$RESULTS_FILE" "$SUMMARY_FILE" "$FIFO_IN" "$FIFO_OUT" "$GNMI_DEBUG_LOG"
 
 # Python binary path setup
 PYTHON_BIN="python3"
 if [ -f "./.venv/bin/python3" ]; then
     PYTHON_BIN="./.venv/bin/python3"
 fi
+
+# -----------------------------------------------------------------------------
+# Pre-flight checks
+# -----------------------------------------------------------------------------
+preflight_failed=0
+
+echo "=================================================================="
+echo "  Pre-flight checks"
+echo "=================================================================="
+
+# 1. Python interpreter
+if [ ! -x "$PYTHON_BIN" ]; then
+    echo "[!] ERROR: Python interpreter not found or not executable: $PYTHON_BIN"
+    preflight_failed=1
+else
+    echo "    [OK] Python: $PYTHON_BIN"
+fi
+
+# 2. pygnmi in that interpreter
+if [ "$preflight_failed" -eq 0 ]; then
+    if ! "$PYTHON_BIN" -c 'import pygnmi' >/dev/null 2>&1; then
+        echo "[!] ERROR: pygnmi is not importable in $PYTHON_BIN"
+        echo "    Install it with: $PYTHON_BIN -m pip install pygnmi"
+        preflight_failed=1
+    else
+        echo "    [OK] pygnmi is importable"
+    fi
+fi
+
+# 3. Client certs
+for c in /etc/onos/certs/client1.crt \
+         /etc/onos/certs/client1.key \
+         /etc/onos/certs/tls.cacrt; do
+    if [ ! -f "$c" ]; then
+        echo "[!] ERROR: missing $c"
+        echo "    Copy the certs from the controller host:"
+        echo "      scp <controller>:/etc/onos/certs/client1.crt /etc/onos/certs/"
+        echo "      scp <controller>:/etc/onos/certs/client1.key /etc/onos/certs/"
+        echo "      scp <controller>:/etc/onos/certs/tls.cacrt  /etc/onos/certs/"
+        preflight_failed=1
+    elif [ ! -r "$c" ]; then
+        echo "[!] ERROR: $c is not readable by $USER"
+        echo "    Fix with: sudo chown $USER:$USER $c"
+        preflight_failed=1
+    else
+        echo "    [OK] $c"
+    fi
+done
+
+# 4. Reachability of onos-config gNMI
+if nc -z "$CONTROLLER_HOST" 5150 2>/dev/null; then
+    echo "    [OK] TCP $CONTROLLER_HOST:5150 reachable"
+else
+    echo "[!] ERROR: cannot reach $CONTROLLER_HOST:5150"
+    echo "    Ensure the onos-config LoadBalancer or port-forward is active."
+    preflight_failed=1
+fi
+
+# 5. RESTCONF gateway (informational only — modes 1,2,6 need it)
+if curl -sf -o /dev/null "http://127.0.0.1:8181/restconf/" 2>/dev/null; then
+    echo "    [OK] RESTCONF gateway reachable at 127.0.0.1:8181"
+else
+    echo "    [--] RESTCONF gateway not reachable at 127.0.0.1:8181"
+    echo "         Modes 1, 2 and 6 will fail; modes 3, 4, 5 can still run."
+fi
+
+if [ "$preflight_failed" -ne 0 ]; then
+    echo
+    echo "[!] Pre-flight checks failed. Aborting."
+    exit 1
+fi
+
+echo "    All required pre-flight checks passed."
+echo
 
 # Map non-IP hostnames to prevent 5s DNS timeouts in ONOS backend
 PAYLOAD_NODE_IP="${TARGET_NODE_IP}"
@@ -70,17 +145,43 @@ else:
 PY_DAEMON_SCRIPT="/tmp/gnmi_daemon_$$.py"
 
 cat << 'PYEOF' > "$PY_DAEMON_SCRIPT"
-import sys, time, warnings, logging, json
+import sys, time, warnings, logging, json, traceback, os
 warnings.filterwarnings('ignore')
 logging.disable(logging.CRITICAL)
+
+DEBUG_LOG = "/tmp/gnmi_debug.log"
 
 target = sys.argv[1]
 device = sys.argv[2]
 host, port = target.split(':') if ':' in target else (target, '5150')
 
-gc = None
+with open(DEBUG_LOG, "w") as f:
+    f.write(f"daemon starting target={target} device={device}\n")
+
+# --- import pygnmi ---
 try:
     from pygnmi.client import gNMIclient
+except Exception as e:
+    with open(DEBUG_LOG, "a") as f:
+        f.write(f"import pygnmi failed: {e}\n")
+    print(f"FATAL|import pygnmi failed: {e}")
+    sys.stdout.flush()
+    sys.exit(1)
+
+# --- verify certs exist ---
+for p in ("/etc/onos/certs/client1.crt",
+          "/etc/onos/certs/client1.key",
+          "/etc/onos/certs/tls.cacrt"):
+    if not os.path.exists(p):
+        with open(DEBUG_LOG, "a") as f:
+            f.write(f"missing cert file: {p}\n")
+        print(f"FATAL|missing cert file: {p}")
+        sys.stdout.flush()
+        sys.exit(1)
+
+# --- connect ---
+gc = None
+try:
     gc = gNMIclient(
         target=(host, int(port)),
         skip_verify=True,
@@ -89,21 +190,23 @@ try:
         path_root='/etc/onos/certs/tls.cacrt'
     )
     gc.connect()
-except Exception:
-    pass
+    with open(DEBUG_LOG, "a") as f:
+        f.write("gNMI client connected\n")
+except Exception as e:
+    with open(DEBUG_LOG, "a") as f:
+        f.write(f"connect failed: {e}\n")
+        traceback.print_exc(file=f)
+    print(f"FATAL|connect failed: {e}")
+    sys.stdout.flush()
+    sys.exit(1)
 
 while True:
     line = sys.stdin.readline()
     if not line or 'QUIT' in line:
         break
-    
+
     parts = line.strip().split('|')
     action = parts[0]
-    
-    if not gc:
-        print("FAILED")
-        sys.stdout.flush()
-        continue
 
     try:
         t0 = time.perf_counter()
@@ -121,7 +224,7 @@ while True:
                     success = True
                     break
                 except Exception as path_err:
-                    with open("/tmp/gnmi_debug.log", "a") as f:
+                    with open(DEBUG_LOG, "a") as f:
                         f.write(f"Path failed [{p}]: {path_err}\n")
                     continue
             if not success:
@@ -129,13 +232,11 @@ while True:
 
         elif action == "GET":
             gc.get(path=['/openconfig-interfaces:interfaces/interface[name=eth1]'], target=device)
-        
+
         elapsed = int((time.perf_counter() - t0) * 1000)
         print(f"{elapsed}")
     except Exception as e:
-        with open("/tmp/gnmi_debug.log", "a") as f:
-            import traceback
-            f.write(f"Action {action} failed:\n")
+        with open(DEBUG_LOG, "a") as f:
             traceback.print_exc(file=f)
         print("FAILED")
     sys.stdout.flush()
@@ -168,6 +269,24 @@ trap cleanup EXIT
 
 sleep 1
 
+# Check whether the daemon is still alive and whether it printed a FATAL line.
+# If FATAL, we surface the reason and exit instead of showing "FAILED" for
+# every benchmark mode.
+if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+    DAEMON_MSG=$(head -n1 "$FIFO_OUT" 2>/dev/null || echo "")
+    if [[ "$DAEMON_MSG" == FATAL* ]]; then
+        echo
+        echo "[!] gNMI daemon failed to start:"
+        echo "    ${DAEMON_MSG#FATAL|}"
+        echo "    See ${GNMI_DEBUG_LOG} for details."
+    else
+        echo
+        echo "[!] gNMI daemon exited unexpectedly."
+        echo "    See ${GNMI_DEBUG_LOG} for details."
+    fi
+    exit 1
+fi
+
 exec_gnmi_op() {
     local op_type="$1" val_arg="$2"
     if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
@@ -177,6 +296,11 @@ exec_gnmi_op() {
     echo "${op_type}|${val_arg}" >&3
     local res
     read -r res <&4 || res="FAILED"
+    if [[ "$res" == FATAL* ]]; then
+        echo "[!] gNMI daemon reported: ${res#FATAL|}" >&2
+        echo "FAILED"
+        return
+    fi
     echo "$res"
 }
 
@@ -227,7 +351,7 @@ run_lifecycle_benchmark() {
     echo -n "[*] Pre-Warmup Lifecycle Run... "
     wp_conn=$(exec_connect "$mode_id" "$nb_proto" "$sb_proto" "warmup")
     check_step "Warmup Connect" "$wp_conn"
-    
+
     if [ "$nb_proto" == "RESTCONF" ]; then
         wp_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
     else
