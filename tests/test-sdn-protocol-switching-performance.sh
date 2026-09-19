@@ -7,13 +7,46 @@ TARGET_DEVICE="${TARGET_DEVICE:-quantum-node-1}"
 TARGET_NODE_IP="${TARGET_NODE_IP:-10.0.0.254}"
 INTERVAL="${INTERVAL:-0.5}"
 
+# -----------------------------------------------------------------------------
+# gNMI target selection
+#
+#   ONOS_GNMI_TARGET_MODE=controller   (default)
+#       The daemon connects to onos-config:5150 over mTLS, and onos-config
+#       re-emits the request southbound to the target device. This measures
+#       the full µONOS control plane (validation + transaction + Raft +
+#       southbound push). Slower, but representative of the real deployment.
+#
+#   ONOS_GNMI_TARGET_MODE=direct
+#       The daemon connects straight to the target's own gNMI server
+#       (TARGET_DEVICE_GNMI_ADDR, default 10.0.0.254:50051) in plaintext.
+#       This measures only the device + the northbound protocol. Faster,
+#       and comparable to the RESTCONF gateway modes.
+#
+# Override the target's own gNMI endpoint with TARGET_DEVICE_GNMI_ADDR.
+# -----------------------------------------------------------------------------
+ONOS_GNMI_TARGET_MODE="${ONOS_GNMI_TARGET_MODE:-controller}"
 CONTROLLER_HOST="10.0.0.2"
+TARGET_DEVICE_GNMI_ADDR="${TARGET_DEVICE_GNMI_ADDR:-10.0.0.254:50051}"
+
+case "$ONOS_GNMI_TARGET_MODE" in
+    controller)
+        ONOS_GNMI_TARGET="${CONTROLLER_HOST}:5150"
+        GNMI_TLS_MODE="mtls"     # daemon uses client1.crt/key + tls.cacrt
+        ;;
+    direct)
+        ONOS_GNMI_TARGET="${TARGET_DEVICE_GNMI_ADDR}"
+        GNMI_TLS_MODE="plain"    # daemon uses an insecure channel
+        ;;
+    *)
+        echo "[!] ERROR: ONOS_GNMI_TARGET_MODE must be 'controller' or 'direct' (got '$ONOS_GNMI_TARGET_MODE')"
+        exit 1
+        ;;
+esac
 
 # RESTCONF gateway address.
 # Default assumes a kubectl port-forward is active (kubectl port-forward -n micro-onos svc/restconf-gateway 8181:8181).
 # Alternative: use the LoadBalancer IP directly, e.g. http://172.28.32.106:8181/...
 RESTCONF_GW_URL="${RESTCONF_GW_URL:-http://10.0.0.2:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service}"
-ONOS_GNMI_TARGET="${CONTROLLER_HOST}:5150"
 
 RESULTS_FILE="/tmp/sdn_benchmark_raw.txt"
 SUMMARY_FILE="/tmp/sdn_benchmark_summary.txt"
@@ -36,6 +69,9 @@ preflight_failed=0
 
 echo "=================================================================="
 echo "  Pre-flight checks"
+echo "  gNMI target mode: ${ONOS_GNMI_TARGET_MODE}"
+echo "  gNMI endpoint:    ${ONOS_GNMI_TARGET}"
+echo "  gNMI TLS mode:    ${GNMI_TLS_MODE}"
 echo "=================================================================="
 
 # 1. Python interpreter
@@ -46,53 +82,59 @@ else
     echo "    [OK] Python: $PYTHON_BIN"
 fi
 
-# 2. pygnmi in that interpreter
+# 2. gNMI stubs (daemon imports gnmi_pb2 / gnmi_pb2_grpc)
 if [ "$preflight_failed" -eq 0 ]; then
-    if ! "$PYTHON_BIN" -c 'import pygnmi' >/dev/null 2>&1; then
-        echo "[!] ERROR: pygnmi is not importable in $PYTHON_BIN"
-        echo "    Install it with: $PYTHON_BIN -m pip install pygnmi"
+    if ! "$PYTHON_BIN" -c "import sys; sys.path.insert(0, 'proto'); import gnmi_pb2, gnmi_pb2_grpc" >/dev/null 2>&1; then
+        echo "[!] ERROR: gNMI stubs (gnmi_pb2 / gnmi_pb2_grpc) are not importable."
+        echo "    Run the bootstrap to generate them:"
+        echo "      ./bootstrap-oss-terminal.sh"
         preflight_failed=1
     else
-        echo "    [OK] pygnmi is importable"
+        echo "    [OK] gNMI stubs importable"
     fi
 fi
 
-# 3. Client certs — presence, readability, and whether they match the
-#    controller's current set.
-for c in /etc/onos/certs/client1.crt \
-         /etc/onos/certs/client1.key \
-         /etc/onos/certs/tls.cacrt; do
-    if [ ! -f "$c" ]; then
-        echo "[!] ERROR: missing $c"
-        preflight_failed=1
-    elif [ ! -r "$c" ]; then
-        echo "[!] ERROR: $c is not readable by $USER"
-        preflight_failed=1
-    else
-        echo "    [OK] $c present and readable"
-    fi
-done
+# 3. Client certs — only required when talking to onos-config (mTLS).
+if [ "$GNMI_TLS_MODE" = "mtls" ]; then
+    for c in /etc/onos/certs/client1.crt \
+             /etc/onos/certs/client1.key \
+             /etc/onos/certs/tls.cacrt; do
+        if [ ! -f "$c" ]; then
+            echo "[!] ERROR: missing $c"
+            preflight_failed=1
+        elif [ ! -r "$c" ]; then
+            echo "[!] ERROR: $c is not readable by $USER"
+            preflight_failed=1
+        else
+            echo "    [OK] $c present and readable"
+        fi
+    done
 
-# 3b. Cert subject sanity check: the client cert must NOT have the server's CN.
-if [ -f /etc/onos/certs/client1.crt ]; then
-    cn=$(openssl x509 -in /etc/onos/certs/client1.crt -noout -subject 2>/dev/null \
-         | sed -n 's/.*CN *= *\([^,]*\).*/\1/p')
-    if [ -z "$cn" ]; then
-        echo "[!] ERROR: could not read subject from /etc/onos/certs/client1.crt"
-        preflight_failed=1
-    elif [[ "$cn" == onos-config* ]]; then
-        echo "[!] ERROR: /etc/onos/certs/client1.crt has CN='$cn', which is the SERVER cert, not a client cert."
-        preflight_failed=1
-    else
-        echo "    [OK] client1.crt subject CN=$cn"
+    # Cert subject sanity check: the client cert must NOT have the server's CN.
+    if [ -f /etc/onos/certs/client1.crt ]; then
+        cn=$(openssl x509 -in /etc/onos/certs/client1.crt -noout -subject 2>/dev/null \
+             | sed -n 's/.*CN *= *\([^,]*\).*/\1/p')
+        if [ -z "$cn" ]; then
+            echo "[!] ERROR: could not read subject from /etc/onos/certs/client1.crt"
+            preflight_failed=1
+        elif [[ "$cn" == onos-config* ]]; then
+            echo "[!] ERROR: /etc/onos/certs/client1.crt has CN='$cn', which is the SERVER cert, not a client cert."
+            preflight_failed=1
+        else
+            echo "    [OK] client1.crt subject CN=$cn"
+        fi
     fi
-fi
-
-# 4. Reachability of onos-config gNMI
-if nc -z "$CONTROLLER_HOST" 5150 2>/dev/null; then
-    echo "    [OK] TCP $CONTROLLER_HOST:5150 reachable"
 else
-    echo "[!] ERROR: cannot reach $CONTROLLER_HOST:5150"
+    echo "    [--] plaintext mode: skipping cert checks"
+fi
+
+# 4. Reachability of the chosen gNMI endpoint
+GNMI_HOST="${ONOS_GNMI_TARGET%%:*}"
+GNMI_PORT="${ONOS_GNMI_TARGET##*:}"
+if nc -z "$GNMI_HOST" "$GNMI_PORT" 2>/dev/null; then
+    echo "    [OK] TCP ${ONOS_GNMI_TARGET} reachable"
+else
+    echo "[!] ERROR: cannot reach ${ONOS_GNMI_TARGET}"
     preflight_failed=1
 fi
 
@@ -160,8 +202,11 @@ PY_DAEMON_SCRIPT="./tests/gnmi_daemon.py"
 
 mkfifo "$FIFO_IN" "$FIFO_OUT"
 
-# Single daemon process using created file script
-$PYTHON_BIN "$PY_DAEMON_SCRIPT" "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" < "$FIFO_IN" > "$FIFO_OUT" &
+# Launch the daemon. It receives three arguments:
+#   $1 = target endpoint (host:port)
+#   $2 = target device name (for the gNMI Path.target field)
+#   $3 = TLS mode: "mtls" or "plain"
+$PYTHON_BIN "$PY_DAEMON_SCRIPT" "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$GNMI_TLS_MODE" < "$FIFO_IN" > "$FIFO_OUT" &
 DAEMON_PID=$!
 
 # Open file descriptors on the created FIFOs
@@ -325,8 +370,9 @@ run_lifecycle_benchmark "6" "RESTCONF -> gNMI"    "RESTCONF" "gNMI"
 # Summary Output Table
 echo "=========================================================================================================="
 echo "                   SDN PROTOCOL BENCHMARK SUMMARY (${ITERATIONS} Full Lifecycle Trials)                  "
+echo "                     gNMI target mode: ${ONOS_GNMI_TARGET_MODE} (${ONOS_GNMI_TARGET})"
 echo "=========================================================================================================="
-printf "%-7s | %-20s | %-15s | %-15s | %-15s | %-15s\n" "Mode" "Path" "Connect (ms)" "Status (ms)" "Disconnect (ms)" "Total Cycle (ms)"
+printf "%-7s | %-20s | %-15s | %-15s | %-15s | %-15s\n" "Mode" "Path" "Connect (ms)" "Status (ms)" "Disconnect (ms)" | "Total Cycle (ms)"
 echo "----------------------------------------------------------------------------------------------------------"
 
 while IFS='|' read -r mid mname c_stat s_stat d_stat t_stat; do
