@@ -372,7 +372,7 @@ echo "==========================================================================
 echo "                   SDN PROTOCOL BENCHMARK SUMMARY (${ITERATIONS} Full Lifecycle Trials)                  "
 echo "                     gNMI target mode: ${ONOS_GNMI_TARGET_MODE} (${ONOS_GNMI_TARGET})"
 echo "=========================================================================================================="
-printf "%-7s | %-20s | %-15s | %-15s | %-15s | %-15s\n" "Mode" "Path" "Connect (ms)" "Status (ms)" "Disconnect (ms)" | "Total Cycle (ms)"
+printf "%-7s | %-20s | %-15s | %-15s | %-15s | %-15s\n" "Mode" "Path" "Connect (ms)" "Status (ms)" "Disconnect (ms)" "Total Cycle (ms)"
 echo "----------------------------------------------------------------------------------------------------------"
 
 while IFS='|' read -r mid mname c_stat s_stat d_stat t_stat; do
