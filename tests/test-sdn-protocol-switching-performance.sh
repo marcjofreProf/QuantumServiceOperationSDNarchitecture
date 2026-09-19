@@ -7,7 +7,7 @@ TARGET_DEVICE="${TARGET_DEVICE:-quantum-node-1}"
 TARGET_NODE_IP="${TARGET_NODE_IP:-10.0.0.254}"
 INTERVAL="${INTERVAL:-0.5}"
 
-CONTROLLER_HOST="172.28.32.106"
+CONTROLLER_HOST="10.0.0.2"
 RESTCONF_GW_URL="${RESTCONF_GW_URL:-http://127.0.0.1:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service}"
 ONOS_GNMI_TARGET="${CONTROLLER_HOST}:5150"
 
@@ -256,6 +256,23 @@ for p in ("/etc/onos/certs/client1.crt",
 # --- connect ---
 gc = None
 try:
+    # pygnmi does not expose gRPC channel options. Python gRPC by default
+    # sends the target IP as the authority/SNI, which does not match the
+    # server cert's CN ("onos-config.opennetworking.org", no SAN). The TLS
+    # handshake then stalls and the channel times out with FutureTimeoutError.
+    # We patch grpc.secure_channel to inject the correct SNI/authority, which
+    # is what "gnmic --skip-verify" does internally and why gnmic works.
+    import grpc
+    _orig_secure_channel = grpc.secure_channel
+
+    def _patched_secure_channel(target, credentials, options=None, *args, **kwargs):
+        opts = list(options or [])
+        opts.append(("grpc.ssl_target_name_override", "onos-config.opennetworking.org"))
+        opts.append(("grpc.default_authority",         "onos-config.opennetworking.org"))
+        return _orig_secure_channel(target, credentials, options=opts, *args, **kwargs)
+
+    grpc.secure_channel = _patched_secure_channel
+
     gc = gNMIclient(
         target=(host, int(port)),
         skip_verify=True,
