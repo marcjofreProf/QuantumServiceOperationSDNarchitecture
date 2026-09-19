@@ -84,9 +84,9 @@ try:
     gc = gNMIclient(
         target=(host, int(port)),
         skip_verify=True,
-        path_cert='/etc/onos/certs/tls.crt',
-        path_key='/etc/onos/certs/tls.key',
-        path_root='/etc/onos/certs/tls.crt'
+        path_cert='/etc/onos/certs/client1.crt',
+        path_key='/etc/onos/certs/client1.key',
+        path_root='/etc/onos/certs/tls.cacrt'
     )
     gc.connect()
 except Exception:
