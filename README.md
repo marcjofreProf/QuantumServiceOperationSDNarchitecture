@@ -36,36 +36,64 @@ To seamlessly integrate with ETSI OSM and Kubernetes, this architecture is wrapp
 To execute gnmic operations against the remote micro-onos controller, valid mTLS certificates must be imported into /etc/onos/certs/ on your local host.
 
 1. Certificate Transfer Options
-Extract or deploy the certificate files (tls.crt, tls.key, tls.cacrt) from the controller host using one of the following methods:
+Extract or deploy the certificate files (client1.crt, client1.key, tls.cacrt) from the controller host using one of the following methods. These are the same files the controller uses: client1.* is the ONF-signed client identity from the onos-cli pod, and tls.cacrt is the server's CA extracted from the onos-config pod.
 
 Option (i): Secure Copy (SCP) from Controller IP
 Ensure the certificates on the controller have read permissions, then pull them into a user folder before copying to /etc/onos/certs/:
 ```bash
 mkdir -p $HOME/onos/certs
-scp <username>@<@_IP_controller>:/etc/onos/certs/tls.* $HOME/onos/certs/
+scp <username>@<controller_IP>:/etc/onos/certs/client1.crt $HOME/onos/certs/
+scp <username>@<controller_IP>:/etc/onos/certs/client1.key $HOME/onos/certs/
+scp <username>@<controller_IP>:/etc/onos/certs/tls.cacrt  $HOME/onos/certs/
 sudo mkdir -p /etc/onos/certs
-sudo cp $HOME/onos/certs/tls.* /etc/onos/certs/
-sudo chmod 644 /etc/onos/certs/tls.*
+sudo cp $HOME/onos/certs/client1.crt /etc/onos/certs/
+sudo cp $HOME/onos/certs/client1.key /etc/onos/certs/
+sudo cp $HOME/onos/certs/tls.cacrt  /etc/onos/certs/
+sudo chmod 644 /etc/onos/certs/client1.crt /etc/onos/certs/client1.key /etc/onos/certs/tls.cacrt
 ```
 
 Option (ii): Manual Copy via Shared Folder
 If both host systems share a mounted directory or shared folder, copy certificates to the shared mount point:
 ```bash
 sudo mkdir -p /etc/onos/certs
-sudo cp /path/to/shared_folder/tls.* /etc/onos/certs/
-sudo chmod 644 /etc/onos/certs/tls.*
+sudo cp /path/to/shared_folder/client1.crt /etc/onos/certs/
+sudo cp /path/to/shared_folder/client1.key /etc/onos/certs/
+sudo cp /path/to/shared_folder/tls.cacrt  /etc/onos/certs/
+sudo chmod 644 /etc/onos/certs/client1.crt /etc/onos/certs/client1.key /etc/onos/certs/tls.cacrt
 ```
 
 2. Local .gnmic.yaml Setup
 Generate the global gnmic configuration file in /etc/onos/certs/.gnmic.yaml. Note that tls-ca is omitted due to x509 CA constraints on the micro-onos generated secrets, relying on skip-verify: true for identity validation:
 ```bash
-cat << 'EOF' | sudo tee /etc/onos/certs/.gnmic.yaml > /dev/null
+sudo mkdir -p /etc/gnmic
+cat << 'EOF' | sudo tee /etc/gnmic/gnmic.yaml > /dev/null
 skip-verify: true
-tls-cert: /etc/onos/certs/tls.crt
-tls-key: /etc/onos/certs/tls.key
+tls-cert: /etc/onos/certs/client1.crt
+tls-key: /etc/onos/certs/client1.key
 EOF
-sudo chmod 644 /etc/onos/certs/.gnmic.yaml
+sudo chmod 644 /etc/gnmic/gnmic.yaml
 ```
+
+### Invocation rules for gnmic
+
+The config file above is placed under `/etc/gnmic/` (not in the default
+`gnmic` search path) so it is only loaded when explicitly requested. This
+avoids conflicts with `gnmic --insecure` when probing a plaintext device
+like the BeagleBone.
+
+- To query **onos-config** (mTLS, `skip-verify` required):
+```bash
+gnmic -c /etc/gnmic/gnmic.yaml -a <controller>:5150 capabilities
+```
+
+- To query a **plaintext device** like the BeagleBone (no TLS at all):
+```bash
+gnmic -a <node>:50051 --insecure get --path "/switching/state"
+```
+
+Do not mix `--insecure` with a config that sets `skip-verify: true`: gnmic
+rejects the combination with
+`flags --insecure and --skip-verify are mutually exclusive`.
 
 ## SDN Protocol Architecture: Protobuf & YANG
 
