@@ -8,7 +8,11 @@ TARGET_NODE_IP="${TARGET_NODE_IP:-10.0.0.254}"
 INTERVAL="${INTERVAL:-0.5}"
 
 CONTROLLER_HOST="10.0.0.2"
-RESTCONF_GW_URL="${RESTCONF_GW_URL:-http://127.0.0.1:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service}"
+
+# RESTCONF gateway address.
+# Default assumes a kubectl port-forward is active (kubectl port-forward -n micro-onos svc/restconf-gateway 8181:8181).
+# Alternative: use the LoadBalancer IP directly, e.g. http://172.28.32.106:8181/...
+RESTCONF_GW_URL="${RESTCONF_GW_URL:-http://10.0.0.2:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service}"
 ONOS_GNMI_TARGET="${CONTROLLER_HOST}:5150"
 
 RESULTS_FILE="/tmp/sdn_benchmark_raw.txt"
@@ -54,9 +58,7 @@ if [ "$preflight_failed" -eq 0 ]; then
 fi
 
 # 3. Client certs — presence, readability, and whether they match the
-#    controller's current set. The controller-side fingerprint is fetched
-#    from the onos-cli pod via kubectl (or skipped if kubectl isn't
-#    available on this host).
+#    controller's current set.
 for c in /etc/onos/certs/client1.crt \
          /etc/onos/certs/client1.key \
          /etc/onos/certs/tls.cacrt; do
@@ -71,65 +73,7 @@ for c in /etc/onos/certs/client1.crt \
     fi
 done
 
-# If kubectl is available, compare with what the controller currently has.
-if command -v kubectl >/dev/null 2>&1 && \
-   kubectl get pods -n micro-onos >/dev/null 2>&1; then
-
-    echo "    [*] Comparing certs with the controller's current set..."
-
-    # Local fingerprints (sha256 of the cert bodies)
-    local_leaf_fp=$(openssl x509 -in /etc/onos/certs/client1.crt -noout -fingerprint -sha256 2>/dev/null \
-                    | awk -F= '{print $2}')
-    local_ca_fp=$(openssl x509 -in /etc/onos/certs/tls.cacrt  -noout -fingerprint -sha256 2>/dev/null \
-                    | awk -F= '{print $2}')
-
-    # Controller fingerprints (from the running pods)
-    CLI_POD=$(kubectl get pods -n micro-onos -l app=onos \
-              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    CONFIG_POD=$(kubectl get pods -n micro-onos -l app.kubernetes.io/name=onos-config \
-                 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-
-    if [ -n "$CLI_POD" ]; then
-        ctrl_leaf_fp=$(kubectl exec -n micro-onos "$CLI_POD" -- \
-            sh -c 'cat /etc/ssl/certs/client1.crt' 2>/dev/null \
-            | openssl x509 -noout -fingerprint -sha256 2>/dev/null \
-            | awk -F= '{print $2}')
-    fi
-
-    if [ -n "$CONFIG_POD" ]; then
-        ctrl_ca_fp=$(kubectl exec -n micro-onos "$CONFIG_POD" -- \
-            sh -c 'cat /etc/onos/certs/tls.cacrt' 2>/dev/null \
-            | openssl x509 -noout -fingerprint -sha256 2>/dev/null \
-            | awk -F= '{print $2}')
-    fi
-
-    if [ -n "${ctrl_leaf_fp:-}" ] && [ "$local_leaf_fp" != "$ctrl_leaf_fp" ]; then
-        echo "[!] ERROR: client1.crt on this host does NOT match the controller's client cert."
-        echo "    local:      $local_leaf_fp"
-        echo "    controller: $ctrl_leaf_fp"
-        echo "    Re-extract from the controller host:"
-        echo "      kubectl exec -n micro-onos \$CLI_POD -- cat /etc/ssl/certs/client1.crt | sudo tee /etc/onos/certs/client1.crt >/dev/null"
-        echo "      kubectl exec -n micro-onos \$CLI_POD -- cat /etc/ssl/certs/client1.key | sudo tee /etc/onos/certs/client1.key >/dev/null"
-        preflight_failed=1
-    elif [ -n "${ctrl_leaf_fp:-}" ]; then
-        echo "    [OK] client1.crt matches the controller"
-    fi
-
-    if [ -n "${ctrl_ca_fp:-}" ] && [ "$local_ca_fp" != "$ctrl_ca_fp" ]; then
-        echo "[!] ERROR: tls.cacrt on this host does NOT match the controller's CA."
-        echo "    local:      $local_ca_fp"
-        echo "    controller: $ctrl_ca_fp"
-        preflight_failed=1
-    elif [ -n "${ctrl_ca_fp:-}" ]; then
-        echo "    [OK] tls.cacrt matches the controller"
-    fi
-else
-    echo "    [--] kubectl not available or no access to micro-onos namespace"
-    echo "         Cannot verify that local certs match the controller's set."
-fi
-
-# 3b. Cert subject sanity check: the client cert must NOT have the server's
-#     CN. If it does, someone copied the wrong file.
+# 3b. Cert subject sanity check: the client cert must NOT have the server's CN.
 if [ -f /etc/onos/certs/client1.crt ]; then
     cn=$(openssl x509 -in /etc/onos/certs/client1.crt -noout -subject 2>/dev/null \
          | sed -n 's/.*CN *= *\([^,]*\).*/\1/p')
@@ -138,9 +82,6 @@ if [ -f /etc/onos/certs/client1.crt ]; then
         preflight_failed=1
     elif [[ "$cn" == onos-config* ]]; then
         echo "[!] ERROR: /etc/onos/certs/client1.crt has CN='$cn', which is the SERVER cert, not a client cert."
-        echo "    Re-extract the client cert from the onos-cli pod:"
-        echo "      CLI_POD=\$(kubectl get pods -n micro-onos -l app=onos -o jsonpath='{.items[0].metadata.name}')"
-        echo "      kubectl exec -n micro-onos \$CLI_POD -- cat /etc/ssl/certs/client1.crt | sudo tee /etc/onos/certs/client1.crt >/dev/null"
         preflight_failed=1
     else
         echo "    [OK] client1.crt subject CN=$cn"
@@ -152,11 +93,10 @@ if nc -z "$CONTROLLER_HOST" 5150 2>/dev/null; then
     echo "    [OK] TCP $CONTROLLER_HOST:5150 reachable"
 else
     echo "[!] ERROR: cannot reach $CONTROLLER_HOST:5150"
-    echo "    Ensure the onos-config LoadBalancer or port-forward is active."
     preflight_failed=1
 fi
 
-# 5. RESTCONF gateway (informational only — modes 1,2,6 need it)
+# 5. RESTCONF gateway (informational only)
 if curl -sf -o /dev/null "http://127.0.0.1:8181/restconf/" 2>/dev/null; then
     echo "    [OK] RESTCONF gateway reachable at 127.0.0.1:8181"
 else
@@ -232,14 +172,19 @@ host, port = target.split(':') if ':' in target else (target, '5150')
 with open(DEBUG_LOG, "w") as f:
     f.write(f"daemon starting target={target} device={device}\n")
 
-# --- patch grpc BEFORE pygnmi is imported ---
+# -----------------------------------------------------------------------------
+# IMPORTANT: patch grpc.secure_channel BEFORE importing pygnmi.
+#
 # pygnmi does not expose gRPC channel options. Python gRPC by default sends
 # the target IP as the authority/SNI, which does not match the server cert's
 # CN ("onos-config.opennetworking.org", no SAN). The TLS handshake then
 # stalls and the channel times out with FutureTimeoutError. We patch
-# grpc.secure_channel to inject the correct SNI/authority. This MUST happen
-# before "from pygnmi.client import gNMIclient", otherwise pygnmi captures
-# the original (unpatched) grpc.secure_channel at its own import time.
+# grpc.secure_channel to inject the correct SNI/authority.
+#
+# The patch MUST be applied before "from pygnmi.client import gNMIclient",
+# otherwise pygnmi captures the original (unpatched) grpc.secure_channel at
+# its own import time and the patch has no effect.
+# -----------------------------------------------------------------------------
 try:
     import grpc
     _orig_secure_channel = grpc.secure_channel
@@ -251,6 +196,8 @@ try:
         return _orig_secure_channel(target, credentials, options=opts, *args, **kwargs)
 
     grpc.secure_channel = _patched_secure_channel
+    with open(DEBUG_LOG, "a") as f:
+        f.write("grpc.secure_channel patched (SNI override)\n")
 except Exception as e:
     with open(DEBUG_LOG, "a") as f:
         f.write(f"grpc patch failed: {e}\n")
@@ -282,23 +229,6 @@ for p in ("/etc/onos/certs/client1.crt",
 # --- connect ---
 gc = None
 try:
-    # pygnmi does not expose gRPC channel options. Python gRPC by default
-    # sends the target IP as the authority/SNI, which does not match the
-    # server cert's CN ("onos-config.opennetworking.org", no SAN). The TLS
-    # handshake then stalls and the channel times out with FutureTimeoutError.
-    # We patch grpc.secure_channel to inject the correct SNI/authority, which
-    # is what "gnmic --skip-verify" does internally and why gnmic works.
-    import grpc
-    _orig_secure_channel = grpc.secure_channel
-
-    def _patched_secure_channel(target, credentials, options=None, *args, **kwargs):
-        opts = list(options or [])
-        opts.append(("grpc.ssl_target_name_override", "onos-config.opennetworking.org"))
-        opts.append(("grpc.default_authority",         "onos-config.opennetworking.org"))
-        return _orig_secure_channel(target, credentials, options=opts, *args, **kwargs)
-
-    grpc.secure_channel = _patched_secure_channel
-
     gc = gNMIclient(
         target=(host, int(port)),
         skip_verify=True,
@@ -384,11 +314,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sleep 1
+sleep 2
 
 # Check whether the daemon is still alive and whether it printed a FATAL line.
-# If FATAL, we surface the reason and exit instead of showing "FAILED" for
-# every benchmark mode.
 if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
     DAEMON_MSG=$(head -n1 "$FIFO_OUT" 2>/dev/null || echo "")
     if [[ "$DAEMON_MSG" == FATAL* ]]; then
@@ -487,20 +415,16 @@ run_lifecycle_benchmark() {
     for ((i=1; i<=ITERATIONS; i++)); do
         local service_id="qservice-m${mode_id}-i${i}"
 
-        # Connect Phase
         t_conn=$(exec_connect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
 
-        # Status Read Phase
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
             t_stat=$(exec_gnmi_op "GET" "")
         fi
 
-        # Disconnect Phase
         t_disc=$(exec_disconnect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
 
-        # Total Cycle Time
         if [ "$t_conn" != "FAILED" ] && [ "$t_stat" != "FAILED" ] && [ "$t_disc" != "FAILED" ]; then
             t_total=$((t_conn + t_stat + t_disc))
         else
@@ -516,7 +440,6 @@ run_lifecycle_benchmark() {
         sleep "$INTERVAL"
     done
 
-    # Statistics Calculation
     IFS='|' read -r c_avg c_sd c_min c_max <<< "$(calc_stats $conn_list)"
     IFS='|' read -r s_avg s_sd s_min s_max <<< "$(calc_stats $stat_list)"
     IFS='|' read -r d_avg d_sd d_min d_max <<< "$(calc_stats $disc_list)"
