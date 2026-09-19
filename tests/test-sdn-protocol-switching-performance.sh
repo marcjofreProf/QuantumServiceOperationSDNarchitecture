@@ -232,7 +232,33 @@ host, port = target.split(':') if ':' in target else (target, '5150')
 with open(DEBUG_LOG, "w") as f:
     f.write(f"daemon starting target={target} device={device}\n")
 
-# --- import pygnmi ---
+# --- patch grpc BEFORE pygnmi is imported ---
+# pygnmi does not expose gRPC channel options. Python gRPC by default sends
+# the target IP as the authority/SNI, which does not match the server cert's
+# CN ("onos-config.opennetworking.org", no SAN). The TLS handshake then
+# stalls and the channel times out with FutureTimeoutError. We patch
+# grpc.secure_channel to inject the correct SNI/authority. This MUST happen
+# before "from pygnmi.client import gNMIclient", otherwise pygnmi captures
+# the original (unpatched) grpc.secure_channel at its own import time.
+try:
+    import grpc
+    _orig_secure_channel = grpc.secure_channel
+
+    def _patched_secure_channel(target, credentials, options=None, *args, **kwargs):
+        opts = list(options or [])
+        opts.append(("grpc.ssl_target_name_override", "onos-config.opennetworking.org"))
+        opts.append(("grpc.default_authority",         "onos-config.opennetworking.org"))
+        return _orig_secure_channel(target, credentials, options=opts, *args, **kwargs)
+
+    grpc.secure_channel = _patched_secure_channel
+except Exception as e:
+    with open(DEBUG_LOG, "a") as f:
+        f.write(f"grpc patch failed: {e}\n")
+    print(f"FATAL|grpc patch failed: {e}")
+    sys.stdout.flush()
+    sys.exit(1)
+
+# --- import pygnmi (now sees the patched grpc.secure_channel) ---
 try:
     from pygnmi.client import gNMIclient
 except Exception as e:
