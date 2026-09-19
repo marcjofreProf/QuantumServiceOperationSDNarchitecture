@@ -8,9 +8,18 @@ Reads commands from stdin, one per line, in the form:
     QUIT
 and writes back either a latency in milliseconds or FAILED.
 
-Runs against onos-config over mTLS. We build the gRPC channel directly
-(with the SNI override pygnmi does not expose) and use the gNMI stubs
-generated into proto/ by the bootstrap script.
+Two connection modes are supported, selected by the third CLI argument:
+
+  mtls   -- connect to onos-config over mTLS. Requires the client identity
+            (client1.crt / client1.key) and the server CA (tls.cacrt) under
+            /etc/onos/certs/. This is the "controller" benchmark mode.
+
+  plain  -- connect directly to a plaintext gNMI server (e.g. the BeagleBone
+            at 10.0.0.254:50051). No TLS, no client certs. This is the
+            "direct" benchmark mode that bypasses onos-config.
+
+Invocation:
+    gnmi_daemon.py <host:port> <device-name> <mtls|plain>
 """
 import sys
 import os
@@ -36,37 +45,52 @@ def log(msg):
 
 
 def main():
-    target = sys.argv[1]
-    device = sys.argv[2]
-    host, port = target.split(":") if ":" in target else (target, "5150")
-
-    log(f"daemon starting target={target} device={device}")
-
-    # ---- TLS credentials ----
-    try:
-        cert = open("/etc/onos/certs/client1.crt", "rb").read()
-        key  = open("/etc/onos/certs/client1.key", "rb").read()
-        ca   = open("/etc/onos/certs/tls.cacrt", "rb").read()
-    except Exception as e:
-        log(f"cert read failed: {e}")
-        print(f"FATAL|cert read failed: {e}")
+    if len(sys.argv) < 3:
+        print("FATAL|usage: gnmi_daemon.py <host:port> <device-name> <mtls|plain>")
         sys.stdout.flush()
         sys.exit(1)
 
-    creds = grpc.ssl_channel_credentials(
-        root_certificates=ca,
-        private_key=key,
-        certificate_chain=cert,
-    )
+    target = sys.argv[1]
+    device = sys.argv[2]
+    tls_mode = sys.argv[3] if len(sys.argv) > 3 else "mtls"
+    host, port = target.split(":") if ":" in target else (target, "5150")
 
-    # ---- channel options (the SNI override) ----
-    options = [
-        ("grpc.ssl_target_name_override", "onos-config.opennetworking.org"),
-        ("grpc.default_authority",        "onos-config.opennetworking.org"),
-    ]
+    log(f"daemon starting target={target} device={device} tls_mode={tls_mode}")
+
+    if tls_mode == "mtls":
+        # ---- mTLS against onos-config ----
+        try:
+            cert = open("/etc/onos/certs/client1.crt", "rb").read()
+            key  = open("/etc/onos/certs/client1.key", "rb").read()
+            ca   = open("/etc/onos/certs/tls.cacrt", "rb").read()
+        except Exception as e:
+            log(f"cert read failed: {e}")
+            print(f"FATAL|cert read failed: {e}")
+            sys.stdout.flush()
+            sys.exit(1)
+
+        creds = grpc.ssl_channel_credentials(
+            root_certificates=ca,
+            private_key=key,
+            certificate_chain=cert,
+        )
+        options = [
+            ("grpc.ssl_target_name_override", "onos-config.opennetworking.org"),
+            ("grpc.default_authority",        "onos-config.opennetworking.org"),
+        ]
+        channel = grpc.secure_channel(f"{host}:{port}", creds, options=options)
+
+    elif tls_mode == "plain":
+        # ---- plaintext gRPC against the target device itself ----
+        channel = grpc.insecure_channel(f"{host}:{port}")
+
+    else:
+        log(f"unknown tls_mode: {tls_mode}")
+        print(f"FATAL|unknown tls_mode: {tls_mode}")
+        sys.stdout.flush()
+        sys.exit(1)
 
     try:
-        channel = grpc.secure_channel(f"{host}:{port}", creds, options=options)
         grpc.channel_ready_future(channel).result(timeout=10)
         log("channel ready")
     except Exception as e:
