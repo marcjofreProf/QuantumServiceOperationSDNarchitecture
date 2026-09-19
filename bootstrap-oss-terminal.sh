@@ -443,12 +443,53 @@ chmod +x scripts/*.py 2>/dev/null || true
 chmod +x scripts/*.sh 2>/dev/null || true
 chmod +x tests/*.sh 2>/dev/null || true
 
-echo "[*] Compiling gRPC stubs..."
-./.venv/bin/python3 -m grpc_tools.protoc \
-  -I./src/api/proto \
-  --python_out=./src/api/proto \
-  --grpc_python_out=./src/api/proto \
-  ./src/api/proto/terminal_quantum_gnoi_switching.proto 2>/dev/null || true
+# =============================================================================
+# 10b. Generate OpenConfig gNMI stubs for direct-gRPC clients
+#
+# tests/test-sdn-protocol-switching-performance.sh uses a direct-gRPC gNMI
+# client (tests/gnmi_daemon.py) that imports gnmi_pb2 and gnmi_pb2_grpc.
+# Those stubs must be generated from the OpenConfig gNMI proto files. We pin
+# the same v0.9.1 revision the controller repo uses so both sides agree on
+# the message definitions.
+# =============================================================================
+echo "[*] Generating OpenConfig gNMI stubs..."
+
+GNMI_PROTO_DIR="proto"
+GNMI_EXT_DIR="${GNMI_PROTO_DIR}/github.com/openconfig/gnmi/proto/gnmi_ext"
+
+mkdir -p "$GNMI_EXT_DIR"
+
+if [ ! -f "${GNMI_PROTO_DIR}/gnmi.proto" ]; then
+    echo "  -> Downloading gnmi.proto (v0.9.1)..."
+    curl -fsSL \
+        https://raw.githubusercontent.com/openconfig/gnmi/v0.9.1/proto/gnmi/gnmi.proto \
+        -o "${GNMI_PROTO_DIR}/gnmi.proto"
+fi
+
+if [ ! -f "${GNMI_EXT_DIR}/gnmi_ext.proto" ]; then
+    echo "  -> Downloading gnmi_ext.proto (v0.9.1)..."
+    curl -fsSL \
+        https://raw.githubusercontent.com/openconfig/gnmi/v0.9.1/proto/gnmi_ext/gnmi_ext.proto \
+        -o "${GNMI_EXT_DIR}/gnmi_ext.proto"
+fi
+
+echo "  -> Compiling gNMI protobuf stubs..."
+"$VENV_PYTHON" -m grpc_tools.protoc \
+    -I"${GNMI_PROTO_DIR}" \
+    --python_out="${GNMI_PROTO_DIR}" \
+    --grpc_python_out="${GNMI_PROTO_DIR}" \
+    "${GNMI_PROTO_DIR}/gnmi.proto" \
+    "${GNMI_EXT_DIR}/gnmi_ext.proto"
+
+# Python package markers for the nested extension path
+touch "${GNMI_PROTO_DIR}/__init__.py"
+for d in github github/com github/com/openconfig github/com/openconfig/gnmi \
+         github/com/openconfig/gnmi/proto github/com/openconfig/gnmi/proto/gnmi_ext; do
+    mkdir -p "${GNMI_PROTO_DIR}/$d"
+    touch "${GNMI_PROTO_DIR}/$d/__init__.py"
+done
+
+echo "    [OK] gNMI stubs generated in ${GNMI_PROTO_DIR}/"
 
 # =============================================================================
 # 11. Final Persistence / Reboot Safety Verification
