@@ -53,25 +53,99 @@ if [ "$preflight_failed" -eq 0 ]; then
     fi
 fi
 
-# 3. Client certs
+# 3. Client certs — presence, readability, and whether they match the
+#    controller's current set. The controller-side fingerprint is fetched
+#    from the onos-cli pod via kubectl (or skipped if kubectl isn't
+#    available on this host).
 for c in /etc/onos/certs/client1.crt \
          /etc/onos/certs/client1.key \
          /etc/onos/certs/tls.cacrt; do
     if [ ! -f "$c" ]; then
         echo "[!] ERROR: missing $c"
-        echo "    Copy the certs from the controller host:"
-        echo "      scp <controller>:/etc/onos/certs/client1.crt /etc/onos/certs/"
-        echo "      scp <controller>:/etc/onos/certs/client1.key /etc/onos/certs/"
-        echo "      scp <controller>:/etc/onos/certs/tls.cacrt  /etc/onos/certs/"
         preflight_failed=1
     elif [ ! -r "$c" ]; then
         echo "[!] ERROR: $c is not readable by $USER"
-        echo "    Fix with: sudo chown $USER:$USER $c"
         preflight_failed=1
     else
-        echo "    [OK] $c"
+        echo "    [OK] $c present and readable"
     fi
 done
+
+# If kubectl is available, compare with what the controller currently has.
+if command -v kubectl >/dev/null 2>&1 && \
+   kubectl get pods -n micro-onos >/dev/null 2>&1; then
+
+    echo "    [*] Comparing certs with the controller's current set..."
+
+    # Local fingerprints (sha256 of the cert bodies)
+    local_leaf_fp=$(openssl x509 -in /etc/onos/certs/client1.crt -noout -fingerprint -sha256 2>/dev/null \
+                    | awk -F= '{print $2}')
+    local_ca_fp=$(openssl x509 -in /etc/onos/certs/tls.cacrt  -noout -fingerprint -sha256 2>/dev/null \
+                    | awk -F= '{print $2}')
+
+    # Controller fingerprints (from the running pods)
+    CLI_POD=$(kubectl get pods -n micro-onos -l app=onos \
+              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    CONFIG_POD=$(kubectl get pods -n micro-onos -l app.kubernetes.io/name=onos-config \
+                 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+    if [ -n "$CLI_POD" ]; then
+        ctrl_leaf_fp=$(kubectl exec -n micro-onos "$CLI_POD" -- \
+            sh -c 'cat /etc/ssl/certs/client1.crt' 2>/dev/null \
+            | openssl x509 -noout -fingerprint -sha256 2>/dev/null \
+            | awk -F= '{print $2}')
+    fi
+
+    if [ -n "$CONFIG_POD" ]; then
+        ctrl_ca_fp=$(kubectl exec -n micro-onos "$CONFIG_POD" -- \
+            sh -c 'cat /etc/onos/certs/tls.cacrt' 2>/dev/null \
+            | openssl x509 -noout -fingerprint -sha256 2>/dev/null \
+            | awk -F= '{print $2}')
+    fi
+
+    if [ -n "${ctrl_leaf_fp:-}" ] && [ "$local_leaf_fp" != "$ctrl_leaf_fp" ]; then
+        echo "[!] ERROR: client1.crt on this host does NOT match the controller's client cert."
+        echo "    local:      $local_leaf_fp"
+        echo "    controller: $ctrl_leaf_fp"
+        echo "    Re-extract from the controller host:"
+        echo "      kubectl exec -n micro-onos \$CLI_POD -- cat /etc/ssl/certs/client1.crt | sudo tee /etc/onos/certs/client1.crt >/dev/null"
+        echo "      kubectl exec -n micro-onos \$CLI_POD -- cat /etc/ssl/certs/client1.key | sudo tee /etc/onos/certs/client1.key >/dev/null"
+        preflight_failed=1
+    elif [ -n "${ctrl_leaf_fp:-}" ]; then
+        echo "    [OK] client1.crt matches the controller"
+    fi
+
+    if [ -n "${ctrl_ca_fp:-}" ] && [ "$local_ca_fp" != "$ctrl_ca_fp" ]; then
+        echo "[!] ERROR: tls.cacrt on this host does NOT match the controller's CA."
+        echo "    local:      $local_ca_fp"
+        echo "    controller: $ctrl_ca_fp"
+        preflight_failed=1
+    elif [ -n "${ctrl_ca_fp:-}" ]; then
+        echo "    [OK] tls.cacrt matches the controller"
+    fi
+else
+    echo "    [--] kubectl not available or no access to micro-onos namespace"
+    echo "         Cannot verify that local certs match the controller's set."
+fi
+
+# 3b. Cert subject sanity check: the client cert must NOT have the server's
+#     CN. If it does, someone copied the wrong file.
+if [ -f /etc/onos/certs/client1.crt ]; then
+    cn=$(openssl x509 -in /etc/onos/certs/client1.crt -noout -subject 2>/dev/null \
+         | sed -n 's/.*CN *= *\([^,]*\).*/\1/p')
+    if [ -z "$cn" ]; then
+        echo "[!] ERROR: could not read subject from /etc/onos/certs/client1.crt"
+        preflight_failed=1
+    elif [[ "$cn" == onos-config* ]]; then
+        echo "[!] ERROR: /etc/onos/certs/client1.crt has CN='$cn', which is the SERVER cert, not a client cert."
+        echo "    Re-extract the client cert from the onos-cli pod:"
+        echo "      CLI_POD=\$(kubectl get pods -n micro-onos -l app=onos -o jsonpath='{.items[0].metadata.name}')"
+        echo "      kubectl exec -n micro-onos \$CLI_POD -- cat /etc/ssl/certs/client1.crt | sudo tee /etc/onos/certs/client1.crt >/dev/null"
+        preflight_failed=1
+    else
+        echo "    [OK] client1.crt subject CN=$cn"
+    fi
+fi
 
 # 4. Reachability of onos-config gNMI
 if nc -z "$CONTROLLER_HOST" 5150 2>/dev/null; then
