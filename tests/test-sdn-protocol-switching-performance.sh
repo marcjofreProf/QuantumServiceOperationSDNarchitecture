@@ -229,6 +229,9 @@ for p in ("/etc/onos/certs/client1.crt",
 # --- connect ---
 gc = None
 try:
+    grpc.secure_channel = _patched_secure_channel
+    with open(DEBUG_LOG, "a") as f:
+        f.write("grpc.secure_channel patched (SNI override)\n")
     gc = gNMIclient(
         target=(host, int(port)),
         skip_verify=True,
