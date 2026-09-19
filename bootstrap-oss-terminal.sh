@@ -103,13 +103,31 @@ else
     echo "  -> All required system dependencies are already installed."
 fi
 
-# Verify and install gnmic for gNMI benchmark tests
+# Verify and install gnmic for gNMI benchmark tests (pinned to match the
+# controller so both sides agree on flag semantics and output formatting)
+GNMIC_VERSION="0.49.0"
 if ! command -v gnmic &>/dev/null; then
-    echo "[*] Installing gnmic CLI tool..."
-    bash -c "$(curl -sL https://get-gnmic.openconfig.net)"
-    echo "  -> gnmic installed successfully."
+    echo "[*] Installing gnmic ${GNMIC_VERSION} CLI tool..."
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)  GNMIC_ARCH="x86_64"  ;;
+        aarch64) GNMIC_ARCH="aarch64" ;;
+        *)       GNMIC_ARCH="x86_64"  ;;
+    esac
+    curl -sSL -o /tmp/gnmic.tar.gz \
+        "https://github.com/openconfig/gnmic/releases/download/v${GNMIC_VERSION}/gnmic_${GNMIC_VERSION}_linux_${GNMIC_ARCH}.tar.gz"
+    sudo tar xzf /tmp/gnmic.tar.gz -C /usr/local/bin gnmic
+    sudo chmod +x /usr/local/bin/gnmic
+    rm -f /tmp/gnmic.tar.gz
+    echo "  -> gnmic ${GNMIC_VERSION} installed successfully."
 else
-    echo "  -> gnmic is already installed."
+    INSTALLED_GNMIC=$(gnmic version 2>/dev/null | awk '/version/ {print $NF}')
+    if [ "$INSTALLED_GNMIC" != "$GNMIC_VERSION" ]; then
+        echo "  -> gnmic is installed (${INSTALLED_GNMIC}) but ${GNMIC_VERSION} is expected."
+        echo "     To pin to ${GNMIC_VERSION}: sudo rm /usr/local/bin/gnmic && re-run this script."
+    else
+        echo "  -> gnmic ${GNMIC_VERSION} is already installed."
+    fi
 fi
 
 # Verify and install grpcurl for gRPC/onos-topo debugging
