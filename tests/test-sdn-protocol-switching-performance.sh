@@ -156,145 +156,7 @@ else:
 
 # --- PERSISTENT gNMI DAEMON SETUP ---
 
-PY_DAEMON_SCRIPT="/tmp/gnmi_daemon_$$.py"
-
-cat << 'PYEOF' > "$PY_DAEMON_SCRIPT"
-import sys, time, warnings, logging, json, traceback, os
-warnings.filterwarnings('ignore')
-logging.disable(logging.CRITICAL)
-
-DEBUG_LOG = "/tmp/gnmi_debug.log"
-
-target = sys.argv[1]
-device = sys.argv[2]
-host, port = target.split(':') if ':' in target else (target, '5150')
-
-with open(DEBUG_LOG, "w") as f:
-    f.write(f"daemon starting target={target} device={device}\n")
-
-# -----------------------------------------------------------------------------
-# IMPORTANT: patch grpc.secure_channel BEFORE importing pygnmi.
-#
-# pygnmi does not expose gRPC channel options. Python gRPC by default sends
-# the target IP as the authority/SNI, which does not match the server cert's
-# CN ("onos-config.opennetworking.org", no SAN). The TLS handshake then
-# stalls and the channel times out with FutureTimeoutError. We patch
-# grpc.secure_channel to inject the correct SNI/authority.
-#
-# The patch MUST be applied before "from pygnmi.client import gNMIclient",
-# otherwise pygnmi captures the original (unpatched) grpc.secure_channel at
-# its own import time and the patch has no effect.
-# -----------------------------------------------------------------------------
-try:
-    import grpc
-    _orig_secure_channel = grpc.secure_channel
-
-    def _patched_secure_channel(target, credentials, options=None, *args, **kwargs):
-        opts = list(options or [])
-        opts.append(("grpc.ssl_target_name_override", "onos-config.opennetworking.org"))
-        opts.append(("grpc.default_authority",         "onos-config.opennetworking.org"))
-        return _orig_secure_channel(target, credentials, options=opts, *args, **kwargs)
-
-    grpc.secure_channel = _patched_secure_channel
-    with open(DEBUG_LOG, "a") as f:
-        f.write("grpc.secure_channel patched (SNI override)\n")
-except Exception as e:
-    with open(DEBUG_LOG, "a") as f:
-        f.write(f"grpc patch failed: {e}\n")
-    print(f"FATAL|grpc patch failed: {e}")
-    sys.stdout.flush()
-    sys.exit(1)
-
-# --- import pygnmi (now sees the patched grpc.secure_channel) ---
-try:
-    from pygnmi.client import gNMIclient
-except Exception as e:
-    with open(DEBUG_LOG, "a") as f:
-        f.write(f"import pygnmi failed: {e}\n")
-    print(f"FATAL|import pygnmi failed: {e}")
-    sys.stdout.flush()
-    sys.exit(1)
-
-# --- verify certs exist ---
-for p in ("/etc/onos/certs/client1.crt",
-          "/etc/onos/certs/client1.key",
-          "/etc/onos/certs/tls.cacrt"):
-    if not os.path.exists(p):
-        with open(DEBUG_LOG, "a") as f:
-            f.write(f"missing cert file: {p}\n")
-        print(f"FATAL|missing cert file: {p}")
-        sys.stdout.flush()
-        sys.exit(1)
-
-# --- connect ---
-gc = None
-try:
-    grpc.secure_channel = _patched_secure_channel
-    with open(DEBUG_LOG, "a") as f:
-        f.write("grpc.secure_channel patched (SNI override)\n")
-    gc = gNMIclient(
-        target=(host, int(port)),
-        skip_verify=True,
-        path_cert='/etc/onos/certs/client1.crt',
-        path_key='/etc/onos/certs/client1.key',
-        path_root='/etc/onos/certs/tls.cacrt'
-    )
-    gc.connect()
-    with open(DEBUG_LOG, "a") as f:
-        f.write("gNMI client connected\n")
-except Exception as e:
-    with open(DEBUG_LOG, "a") as f:
-        f.write(f"connect failed: {e}\n")
-        traceback.print_exc(file=f)
-    print(f"FATAL|connect failed: {e}")
-    sys.stdout.flush()
-    sys.exit(1)
-
-while True:
-    line = sys.stdin.readline()
-    if not line or 'QUIT' in line:
-        break
-
-    parts = line.strip().split('|')
-    action = parts[0]
-
-    try:
-        t0 = time.perf_counter()
-        if action == "SET":
-            raw_val = parts[1] if len(parts) > 1 else ""
-            json_val = json.dumps(str(raw_val))
-            paths = [
-                '/openconfig-interfaces:interfaces/interface[name=eth1]/config/description',
-                '/interfaces/interface[name=eth1]/config/description'
-            ]
-            success = False
-            for p in paths:
-                try:
-                    gc.set(update=[(p, json_val)], target=device)
-                    success = True
-                    break
-                except Exception as path_err:
-                    with open(DEBUG_LOG, "a") as f:
-                        f.write(f"Path failed [{p}]: {path_err}\n")
-                    continue
-            if not success:
-                raise Exception("gNMI Set path match failed")
-
-        elif action == "GET":
-            gc.get(path=['/openconfig-interfaces:interfaces/interface[name=eth1]'], target=device)
-
-        elapsed = int((time.perf_counter() - t0) * 1000)
-        print(f"{elapsed}")
-    except Exception as e:
-        with open(DEBUG_LOG, "a") as f:
-            traceback.print_exc(file=f)
-        print("FAILED")
-    sys.stdout.flush()
-
-if gc:
-    try: gc.close()
-    except Exception: pass
-PYEOF
+PY_DAEMON_SCRIPT="./tests/gnmi_daemon.py"
 
 mkfifo "$FIFO_IN" "$FIFO_OUT"
 
@@ -310,7 +172,7 @@ cleanup() {
     echo "QUIT" >&3 2>/dev/null || true
     exec 3>&- 2>/dev/null || true
     exec 4<&- 2>/dev/null || true
-    rm -f "$FIFO_IN" "$FIFO_OUT" "$PY_DAEMON_SCRIPT"
+    rm -f "$FIFO_IN" "$FIFO_OUT"
     if [ -n "$DAEMON_PID" ]; then
         kill "$DAEMON_PID" 2>/dev/null || true
     fi
