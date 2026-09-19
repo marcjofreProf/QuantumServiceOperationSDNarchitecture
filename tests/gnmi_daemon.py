@@ -78,7 +78,7 @@ def main():
 
     stub = gnmi_grpc.gNMIStub(channel)
 
-        def do_set(value):
+    def do_set(value):
         # The controller-quantum-switching model plugin exposes exactly one
         # writable leaf: /switching/state (enum: enabled | disabled).
         # Any other path is rejected by onos-config with "not yet supported".
