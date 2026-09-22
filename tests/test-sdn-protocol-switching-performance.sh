@@ -139,10 +139,13 @@ else
 fi
 
 # 5. RESTCONF gateway (informational only)
-if curl -sf -o /dev/null "http://127.0.0.1:8181/restconf/" 2>/dev/null; then
-    echo "    [OK] RESTCONF gateway reachable at 127.0.0.1:8181"
+# Derive the probe URL from RESTCONF_GW_URL so it stays in sync with what
+# the benchmark actually uses (e.g. 10.0.0.2:8181 instead of 127.0.0.1).
+RESTCONF_PROBE_URL="${RESTCONF_GW_URL%%/restconf/*}/restconf/"
+if curl -sf -o /dev/null "$RESTCONF_PROBE_URL" 2>/dev/null; then
+    echo "    [OK] RESTCONF gateway reachable at ${RESTCONF_PROBE_URL}"
 else
-    echo "    [--] RESTCONF gateway not reachable at 127.0.0.1:8181"
+    echo "    [--] RESTCONF gateway not reachable at ${RESTCONF_PROBE_URL}"
     echo "         Modes 1, 2 and 6 will fail; modes 3, 4, 5 can still run."
 fi
 
