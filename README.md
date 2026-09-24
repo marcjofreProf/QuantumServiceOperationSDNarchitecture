@@ -42,9 +42,9 @@ Option (i): Secure Copy (SCP) from Controller IP
 Ensure the certificates on the controller have read permissions, then pull them into a user folder before copying to /etc/onos/certs/:
 ```bash
 mkdir -p $HOME/onos/certs
-scp <username>@<controller_IP>:/etc/onos/certs/client1.crt $HOME/onos/certs/
-scp <username>@<controller_IP>:/etc/onos/certs/client1.key $HOME/onos/certs/
-scp <username>@<controller_IP>:/etc/onos/certs/tls.cacrt  $HOME/onos/certs/
+scp <username>@<controller_IP>:~/Scripts/QuantumSwitchingSDNarchitecture/.certs/uonos/client1.crt $HOME/onos/certs/
+scp <username>@<controller_IP>:~/Scripts/QuantumSwitchingSDNarchitecture/.certs/uonos/client1.key $HOME/onos/certs/
+scp <username>@<controller_IP>:~/Scripts/QuantumSwitchingSDNarchitecture/.certs/uonos/tls.cacrt  $HOME/onos/certs/
 sudo mkdir -p /etc/onos/certs
 sudo cp $HOME/onos/certs/client1.crt /etc/onos/certs/
 sudo cp $HOME/onos/certs/client1.key /etc/onos/certs/
@@ -57,14 +57,14 @@ If both host systems share a mounted directory or shared folder, copy certificat
 ```bash
 # In controller terminal:
 mkdir -p /path/to/shared_folder/onos/certs
-sudo cp /etc/onos/certs/client1.crt /path/to/shared_folder/onos/certs/
-sudo cp /etc/onos/certs/client1.key /path/to/shared_folder/onos/certs/
-sudo cp /etc/onos/certs/tls.cacrt  /path/to/shared_folder/onos/certs/
+sudo cp .certs/uonos/client1.crt /path/to/shared_folder/onos/certs/
+sudo cp .certs/uonos/client1.key /path/to/shared_folder/onos/certs/
+sudo cp .certs/uonos/tls.cacrt  /path/to/shared_folder/onos/certs/
 # In operational terminal:
 sudo mkdir -p /etc/onos/certs
-sudo cp /path/to/shared_folder/client1.crt /etc/onos/certs/
-sudo cp /path/to/shared_folder/client1.key /etc/onos/certs/
-sudo cp /path/to/shared_folder/tls.cacrt  /etc/onos/certs/
+sudo cp /path/to/shared_folder/onos/certs/client1.crt /etc/onos/certs/
+sudo cp /path/to/shared_folder/onos/certs/client1.key /etc/onos/certs/
+sudo cp /path/to/shared_folder/onos/certs/tls.cacrt  /etc/onos/certs/
 sudo chmod 644 /etc/onos/certs/client1.crt /etc/onos/certs/client1.key /etc/onos/certs/tls.cacrt
 ```
 
