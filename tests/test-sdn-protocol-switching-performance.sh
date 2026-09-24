@@ -123,6 +123,20 @@ if [ "$GNMI_TLS_MODE" = "mtls" ]; then
         else
             echo "    [OK] client1.crt subject CN=$cn"
         fi
+
+        # Chain check: the client cert must be signed by the local CA.
+        if ! openssl verify -CAfile /etc/onos/certs/tls.cacrt \
+                            /etc/onos/certs/client1.crt >/dev/null 2>&1; then
+            echo "[!] ERROR: client1.crt is NOT signed by tls.cacrt"
+            echo "    The client identity does not belong to the CA that onos-config trusts."
+            echo "    Re-copy the cert triplet, e.g.:"
+            echo "      sudo cp .certs/uonos/client1.crt /etc/onos/certs/client1.crt"
+            echo "      sudo cp .certs/uonos/client1.key /etc/onos/certs/client1.key"
+            echo "      sudo cp .certs/uonos/tls.cacrt  /etc/onos/certs/tls.cacrt"
+            preflight_failed=1
+        else
+            echo "    [OK] client1.crt verifies against tls.cacrt"
+        fi
     fi
 else
     echo "    [--] plaintext mode: skipping cert checks"
@@ -291,7 +305,7 @@ exec_disconnect() {
     local mode_id="$1" nb_proto="$2" sb_proto="$3" service_id="$4"
 
     if [ "$nb_proto" == "RESTCONF" ]; then
-        time_exec "curl -s -f -X DELETE '${RESTCONF_GW_URL}' \
+        time_exec "curl -s -f -X DELETE '${RESTCONF_GW_URL}?sb=${sb_proto}' \
             -H 'Content-Type: application/json' \
             -H 'X-Southbound-Target: ${sb_proto}' \
             -d '{\"service-id\":\"${service_id}\",\"target-node\":\"${PAYLOAD_TARGET_DEVICE}\"}'"
