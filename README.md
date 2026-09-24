@@ -55,6 +55,12 @@ sudo chmod 644 /etc/onos/certs/client1.crt /etc/onos/certs/client1.key /etc/onos
 Option (ii): Manual Copy via Shared Folder
 If both host systems share a mounted directory or shared folder, copy certificates to the shared mount point:
 ```bash
+# In controller terminal:
+mkdir -p /path/to/shared_folder/onos/certs
+sudo cp /etc/onos/certs/client1.crt /path/to/shared_folder/onos/certs/
+sudo cp /etc/onos/certs/client1.key /path/to/shared_folder/onos/certs/
+sudo cp /etc/onos/certs/tls.cacrt  /path/to/shared_folder/onos/certs/
+# In operational terminal:
 sudo mkdir -p /etc/onos/certs
 sudo cp /path/to/shared_folder/client1.crt /etc/onos/certs/
 sudo cp /path/to/shared_folder/client1.key /etc/onos/certs/
