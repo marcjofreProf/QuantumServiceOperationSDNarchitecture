@@ -139,13 +139,15 @@ else
 fi
 
 # 5. RESTCONF gateway (informational only)
-# Derive the probe URL from RESTCONF_GW_URL so it stays in sync with what
-# the benchmark actually uses (e.g. 10.0.0.2:8181 instead of 127.0.0.1).
-RESTCONF_PROBE_URL="${RESTCONF_GW_URL%%/restconf/*}/restconf/"
-if curl -sf -o /dev/null "$RESTCONF_PROBE_URL" 2>/dev/null; then
-    echo "    [OK] RESTCONF gateway reachable at ${RESTCONF_PROBE_URL}"
+# Probe the real data URL the benchmark uses, and treat any HTTP reply
+# (1xx–5xx) as "reachable". A 404/405 on /restconf/ root is normal and
+# does NOT mean the gateway is down.
+RESTCONF_PROBE_URL="${RESTCONF_GW_URL}"
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$RESTCONF_PROBE_URL" 2>/dev/null || echo "000")
+if [[ "$HTTP_CODE" =~ ^[1-5][0-9][0-9]$ ]]; then
+    echo "    [OK] RESTCONF gateway reachable at ${RESTCONF_PROBE_URL} (HTTP ${HTTP_CODE})"
 else
-    echo "    [--] RESTCONF gateway not reachable at ${RESTCONF_PROBE_URL}"
+    echo "    [--] RESTCONF gateway not reachable at ${RESTCONF_PROBE_URL} (HTTP ${HTTP_CODE})"
     echo "         Modes 1, 2 and 6 will fail; modes 3, 4, 5 can still run."
 fi
 
