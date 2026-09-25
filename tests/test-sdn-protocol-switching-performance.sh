@@ -179,7 +179,7 @@ PAYLOAD_NODE_IP="${TARGET_NODE_IP}"
 PAYLOAD_TARGET_DEVICE="${TARGET_DEVICE}"
 if [[ "$PAYLOAD_NODE_IP" == "quantum-node-1" || ! "$PAYLOAD_NODE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     PAYLOAD_NODE_IP="10.0.0.254"
-    PAYLOAD_TARGET_DEVICE="10.0.0.254"
+    PAYLOAD_TARGET_DEVICE="quantum-node-1"
 fi
 
 get_time_ms() {
