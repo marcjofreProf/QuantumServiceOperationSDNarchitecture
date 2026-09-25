@@ -365,9 +365,23 @@ run_lifecycle_benchmark() {
         disc_list="${disc_list} ${t_disc}"
         total_list="${total_list} ${t_total}"
 
-        echo "  [Trial ${i}/${ITERATIONS}] Conn: ${t_conn}ms | Stat: ${t_stat}ms | Disc: ${t_disc}ms | Total: ${t_total}ms"
+        if [ -t 1 ]; then
+            # Interactive: overwrite the same line with \r + right-pad to
+            # erase any trailing characters from the previous longer line.
+            printf "\r  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | Total: %5sms" \
+                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$t_total"
+        else
+            printf "  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | Total: %5sms\n" \
+                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$t_total"
+        fi
         sleep "$INTERVAL"
     done
+
+    # Move to a new line after the in-place bar finishes, so the next
+    # mode's header starts cleanly.
+    if [ -t 1 ]; then
+        printf "\n"
+    fi
 
     IFS='|' read -r c_avg c_sd c_min c_max <<< "$(calc_stats $conn_list)"
     IFS='|' read -r s_avg s_sd s_min s_max <<< "$(calc_stats $stat_list)"
