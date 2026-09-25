@@ -69,7 +69,7 @@ sudo chmod 644 /etc/onos/certs/client1.crt /etc/onos/certs/client1.key /etc/onos
 ```
 
 2. Local .gnmic.yaml Setup
-Generate the global gnmic configuration file in /etc/onos/certs/.gnmic.yaml. Note that tls-ca is omitted due to x509 CA constraints on the micro-onos generated secrets, relying on skip-verify: true for identity validation:
+The production code paths (the benchmark daemon and the RESTCONF gateway) use the compiled Python gRPC stubs and verify the server against tls.cacrt with full chain validation. The .gnmic.yaml file below is only needed when invoking the gnmic CLI by hand for ad-hoc debugging:
 ```bash
 sudo mkdir -p /etc/gnmic
 cat << 'EOF' | sudo tee /etc/gnmic/gnmic.yaml > /dev/null
