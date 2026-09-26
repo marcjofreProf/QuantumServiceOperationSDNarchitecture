@@ -239,6 +239,39 @@ fi
 # Ensure AppArmor daemon is running on host
 sudo systemctl enable --now apparmor 2>/dev/null || true
 
+# ---------------------------------------------------------------------------
+# Snap environment sanity check
+#
+# snap-confine can fail to preserve mount namespaces on newer kernels
+# (a known interaction with Linux 6.18's per-CPU namespace ID counter).
+# The failure is intermittent — snap installs succeed on some attempts and
+# fail on others. Rather than discover this deep inside `juju bootstrap`,
+# test it now, and record the result so later steps can react.
+# ---------------------------------------------------------------------------
+echo "[*] Testing snap install capability..."
+
+SNAP_INSTALL_WORKS=false
+for attempt in 1 2 3; do
+    if sudo snap install hello-world 2>/dev/null; then
+        SNAP_INSTALL_WORKS=true
+        break
+    fi
+    # Clean up any partial state before retrying
+    sudo snap remove hello-world 2>/dev/null || true
+    sudo /usr/lib/snapd/snap-discard-ns hello-world 2>/dev/null || true
+    sleep 2
+done
+
+if [ "$SNAP_INSTALL_WORKS" = true ]; then
+    echo "  -> snap installs work."
+    sudo snap remove hello-world 2>/dev/null || true
+else
+    echo "[!] WARNING: snap installs are failing on this host."
+    echo "    This is a known interaction with some Linux 6.18 kernels in WSL2."
+    echo "    The bootstrap will continue and retry as needed, but Juju may"
+    echo "    fail to start if the snap daemon cannot install juju-db."
+fi
+
 # 1b. LXD Group Verification & Session Elevation
 echo "[*] Verifying LXD installation and group permissions..."
 if ! command -v lxd &>/dev/null; then
@@ -457,6 +490,52 @@ else
 
     echo "  -> No registered controller found; preparing local Juju bootstrap..."
     juju clouds --client --format yaml
+
+    # -------------------------------------------------------------------
+    # Pre-install juju-db with retries.
+    #
+    # `juju bootstrap` installs the juju-db snap itself, but snap-confine
+    # can intermittently fail with "cannot preserve mount namespace" on
+    # some WSL2 kernels. Installing the snap here, before Juju is
+    # involved, lets us retry on failure. Once it is installed, Juju
+    # skips its own install step and the race never fires again.
+    # -------------------------------------------------------------------
+    if ! snap list juju-db >/dev/null 2>&1; then
+        echo "  -> Pre-installing juju-db snap (with retries)..."
+
+        JUJU_DB_INSTALLED=false
+        for attempt in $(seq 1 10); do
+            # Clean any partial state from a previous failed attempt
+            sudo /usr/lib/snapd/snap-discard-ns juju-db 2>/dev/null || true
+
+            if sudo snap install juju-db --channel=4.4.30/stable 2>/dev/null; then
+                JUJU_DB_INSTALLED=true
+                echo "     juju-db installed on attempt ${attempt}."
+                break
+            fi
+
+            echo "     [attempt ${attempt}/10] snap install failed; retrying in 3s..."
+            sudo snap remove juju-db 2>/dev/null || true
+            sudo systemctl restart snapd 2>/dev/null || true
+            sleep 3
+        done
+
+        if [ "$JUJU_DB_INSTALLED" != true ]; then
+            echo "[!] ERROR: Could not install juju-db after 10 attempts."
+            echo "    The snap daemon on this host cannot create the mount"
+            echo "    namespace needed by juju-db. This is a known interaction"
+            echo "    between Linux 6.18 kernels in WSL2 and snap-confine."
+            echo "    Options:"
+            echo "      - Reboot WSL (wsl --shutdown from Windows) and re-run."
+            echo "      - Point .wslconfig at an older (6.6.x) kernel."
+            echo "      - Run `sudo snap install hello-world` manually to see"
+            echo "        the exact error and confirm the diagnosis."
+            exit 1
+        fi
+    else
+        echo "  -> juju-db snap is already installed."
+    fi
+
     echo "  -> Bootstrapping controller on LXD cloud 'localhost'..."
     echo "     Controller: $CONTROLLER_NAME"
     echo "     Base:       $JUJU_BOOTSTRAP_BASE"
