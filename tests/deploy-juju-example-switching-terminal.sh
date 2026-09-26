@@ -8,11 +8,25 @@ set -eo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
+# Load the shared deployment config written by the bootstraps so the
+# controller IP stays consistent across all three repositories. Values
+# already set in the environment win over the file.
+QUANTUM_SDN_CONF="${HOME}/.quantum-sdn/config.env"
+if [ -f "$QUANTUM_SDN_CONF" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in ''|\#*) continue ;; esac
+        if [ -z "${!k:-}" ]; then
+            printf -v "$k" '%s' "$v"
+            export "$k"
+        fi
+    done < "$QUANTUM_SDN_CONF"
+fi
+
 VENV_PYANG=".venv/bin/pyang"
 CONTROLLER_NAME="terminal-controller"
 MODEL_NAME="terminal-model"
 APP_NAME="quantum-terminal"
-RESTCONF_CONTROLLER_IP="10.0.0.2"
+RESTCONF_CONTROLLER_IP="${CONTROLLER_HOST:-172.21.2.23}"
 
 echo "=================================================================="
 echo "  Compiling Example YANG & Deploying Juju Terminal Charm"
