@@ -3,9 +3,29 @@
 set -eo pipefail
 
 ITERATIONS="${1:-5}"
-TARGET_DEVICE="${TARGET_DEVICE:-quantum-node-1}"
-TARGET_NODE_IP="${TARGET_NODE_IP:-10.0.0.254}"
 INTERVAL="${INTERVAL:-0.5}"
+
+# -----------------------------------------------------------------------------
+# Deployment configuration
+#
+# Load the shared config written by the bootstraps so the controller IP and
+# node identity are consistent across the three repositories. Values already
+# set in the environment win over the config file, so per-run overrides
+# (TARGET_DEVICE=... TARGET_NODE_IP=... ./test-...) still work as before.
+# -----------------------------------------------------------------------------
+QUANTUM_SDN_CONF="${HOME}/.quantum-sdn/config.env"
+if [ -f "$QUANTUM_SDN_CONF" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in ''|\#*) continue ;; esac
+        if [ -z "${!k:-}" ]; then
+            printf -v "$k" '%s' "$v"
+            export "$k"
+        fi
+    done < "$QUANTUM_SDN_CONF"
+fi
+
+TARGET_DEVICE="${TARGET_DEVICE:-${QUANTUM_NODE_ID:-quantum-node-1}}"
+TARGET_NODE_IP="${TARGET_NODE_IP:-${QUANTUM_NODE_IP:-172.21.128.254}}"
 
 # -----------------------------------------------------------------------------
 # gNMI target selection
@@ -25,8 +45,16 @@ INTERVAL="${INTERVAL:-0.5}"
 # Override the target's own gNMI endpoint with TARGET_DEVICE_GNMI_ADDR.
 # -----------------------------------------------------------------------------
 ONOS_GNMI_TARGET_MODE="${ONOS_GNMI_TARGET_MODE:-controller}"
-CONTROLLER_HOST="10.0.0.2"
-TARGET_DEVICE_GNMI_ADDR="${TARGET_DEVICE_GNMI_ADDR:-10.0.0.254:50051}"
+
+# CONTROLLER_HOST is set above from the config file (default 172.21.2.23).
+# The fallback below only fires if the file does not exist and the shell
+# did not export a value.
+CONTROLLER_HOST="${CONTROLLER_HOST:-172.21.2.23}"
+
+# The node's own gNMI endpoint, used only in direct mode. It is derived
+# from the node IP loaded above so a single config drives both the
+# topo entity name and the direct connection target.
+TARGET_DEVICE_GNMI_ADDR="${TARGET_DEVICE_GNMI_ADDR:-${QUANTUM_NODE_IP:-172.21.128.254}:50051}"
 
 case "$ONOS_GNMI_TARGET_MODE" in
     controller)
@@ -46,7 +74,7 @@ esac
 # RESTCONF gateway address.
 # Default assumes a kubectl port-forward is active (kubectl port-forward -n micro-onos svc/restconf-gateway 8181:8181).
 # Alternative: use the LoadBalancer IP directly, e.g. http://172.28.32.106:8181/...
-RESTCONF_GW_URL="${RESTCONF_GW_URL:-http://10.0.0.2:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service}"
+RESTCONF_GW_URL="${RESTCONF_GW_URL:-http://${CONTROLLER_HOST}:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service}"
 
 RESULTS_FILE="/tmp/sdn_benchmark_raw.txt"
 SUMMARY_FILE="/tmp/sdn_benchmark_summary.txt"
@@ -174,13 +202,12 @@ fi
 echo "    All required pre-flight checks passed."
 echo
 
-# Map non-IP hostnames to prevent 5s DNS timeouts in ONOS backend
+# Build the payload fields. TARGET_DEVICE and TARGET_NODE_IP are already
+# resolved (config file → shell → default), so no hostname-to-IP mapping
+# is needed anymore. The gateway and onos-config both accept the topo
+# entity name in `target-node` and the plain IP in `target-node-ip`.
 PAYLOAD_NODE_IP="${TARGET_NODE_IP}"
 PAYLOAD_TARGET_DEVICE="${TARGET_DEVICE}"
-if [[ "$PAYLOAD_NODE_IP" == "quantum-node-1" || ! "$PAYLOAD_NODE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    PAYLOAD_NODE_IP="10.0.0.254"
-    PAYLOAD_TARGET_DEVICE="quantum-node-1"
-fi
 
 get_time_ms() {
     $PYTHON_BIN -c 'import time; print(int(time.time() * 1000))'
