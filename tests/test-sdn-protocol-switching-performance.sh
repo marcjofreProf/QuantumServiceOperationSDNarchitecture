@@ -27,6 +27,18 @@ fi
 TARGET_DEVICE="${TARGET_DEVICE:-${QUANTUM_NODE_ID:-quantum-node-1}}"
 TARGET_NODE_IP="${TARGET_NODE_IP:-${QUANTUM_NODE_IP:-172.21.128.254}}"
 
+# If TARGET_NODE_IP was set to something that is not a dotted-quad IP
+# (typically the topo entity name, per the historical convention
+# "TARGET_DEVICE=X TARGET_NODE_IP=X ./test-..."), fall back to the
+# configured node IP. The gateway would otherwise forward a hostname
+# to the southbound adapter, which cannot resolve it inside the
+# cluster.
+if [[ ! "$TARGET_NODE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    RESOLVED="${QUANTUM_NODE_IP:-172.21.128.254}"
+    echo "[*] TARGET_NODE_IP='${TARGET_NODE_IP}' is not an IP; using '${RESOLVED}'"
+    TARGET_NODE_IP="${RESOLVED}"
+fi
+
 # -----------------------------------------------------------------------------
 # gNMI target selection
 #
