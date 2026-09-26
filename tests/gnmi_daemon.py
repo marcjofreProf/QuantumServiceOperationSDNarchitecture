@@ -15,8 +15,8 @@ Two connection modes are supported, selected by the third CLI argument:
             /etc/onos/certs/. This is the "controller" benchmark mode.
 
   plain  -- connect directly to a plaintext gNMI server (e.g. the BeagleBone
-            at 10.0.0.254:50051). No TLS, no client certs. This is the
-            "direct" benchmark mode that bypasses onos-config.
+            at <QUANTUM_NODE_IP>:50051). No TLS, no client certs. This is
+            the "direct" benchmark mode that bypasses onos-config.
 
 Invocation:
     gnmi_daemon.py <host:port> <device-name> <mtls|plain>
