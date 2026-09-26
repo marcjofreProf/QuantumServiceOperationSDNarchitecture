@@ -83,25 +83,25 @@ fi
 # Explicitly remove it during uninstall.
 # ------------------------------------------------------------------------------
 
-echo "[*] Removing Juju controller LXD VM..."
+echo "[*] Removing Juju controller LXD containers..."
 
-if sudo lxc info "$CONTROLLER_VM" >/dev/null 2>&1; then
+# Delete the primary controller container plus any orphans that a
+# partial bootstrap may have left behind. Any container starting with
+# "juju-" belongs to Juju.
+removed_any=false
+while read -r name; do
+    [ -z "$name" ] && continue
+    echo "  -> Removing container: $name"
+    sudo lxc config set "$name" boot.autostart false 2>/dev/null || true
+    sudo lxc stop   "$name" --force 2>/dev/null || true
+    sudo lxc delete "$name" --force 2>/dev/null || true
+    removed_any=true
+done < <(sudo lxc list --format csv 2>/dev/null | awk -F, '$1 ~ /^juju-/ {print $1}')
 
-    echo "  -> Found controller VM: $CONTROLLER_VM"
-
-    sudo lxc config set "$CONTROLLER_VM" \
-        boot.autostart false 2>/dev/null || true
-
-    sudo lxc stop "$CONTROLLER_VM" \
-        --force 2>/dev/null || true
-
-    sudo lxc delete "$CONTROLLER_VM" \
-        --force 2>/dev/null || true
-
-    echo "  -> Controller VM removed."
-
+if [ "$removed_any" = true ]; then
+    echo "  -> Juju LXD containers removed."
 else
-    echo "  -> Controller VM '$CONTROLLER_VM' not found. Skipping."
+    echo "  -> No Juju LXD containers found. Skipping."
 fi
 
 # ------------------------------------------------------------------------------
@@ -124,23 +124,44 @@ fi
 
 # ------------------------------------------------------------------------------
 # 5. Remove Juju LXD trust
+#
+# `lxc config trust remove juju` fails on some LXD versions with
+# "Certificate not found" — the name field is display-only and the CLI
+# resolves removals by fingerprint. Read the fingerprint from the CSV
+# output and remove by that.
 # ------------------------------------------------------------------------------
 
 echo "[*] Removing Juju LXD trust..."
 
-sudo lxc config trust remove juju 2>/dev/null || true
-lxc config trust remove juju 2>/dev/null || true
+while read -r fp; do
+    [ -n "$fp" ] && sudo lxc config trust remove "$fp" 2>/dev/null || true
+done < <(sudo lxc config trust list --format csv 2>/dev/null | awk -F, '$2=="juju" {print $4}')
+
 
 # ------------------------------------------------------------------------------
-# 6. Remove local Juju state
+# 6. Remove local Juju state and bootstrap artifacts
 # ------------------------------------------------------------------------------
 
-echo "[*] Removing local Juju state..."
+echo "[*] Removing local Juju state and bootstrap artifacts..."
 
 rm -rf ~/.local/share/juju
 rm -rf ~/.config/juju
+rm -rf ~/.cache/juju
 
-echo "  -> Local Juju state removed."
+# Remove the dedicated SSH key created by the bootstrap for the local
+# Juju connection, and its public companion.
+rm -f ~/.ssh/juju_bootstrap_ed25519
+rm -f ~/.ssh/juju_bootstrap_ed25519.pub
+
+# Remove the corresponding block from ~/.ssh/config so a future bootstrap
+# starts from a clean file.
+if [ -f ~/.ssh/config ]; then
+    # Delete the block that starts with "Host 127.0.0.1" and continues
+    # until the next blank line or end of file.
+    sed -i '/^Host 127\.0\.0\.1$/,/^$/d' ~/.ssh/config 2>/dev/null || true
+fi
+
+echo "  -> Local Juju state, SSH key, and SSH config block removed."
 
 # ------------------------------------------------------------------------------
 # 7. Remove LXD group/session customization
@@ -179,6 +200,30 @@ sudo rm -f /etc/modules-load.d/sdn-uonos.conf
 sudo sysctl --system >/dev/null 2>&1 || true
 
 echo "  -> Custom system configuration removed."
+
+# ------------------------------------------------------------------------------
+# 8b. Remove residual Juju cloud registration and bootstrap files
+# ------------------------------------------------------------------------------
+
+echo "[*] Removing residual Juju cloud registration and files..."
+
+if command -v juju >/dev/null 2>&1; then
+    # The bootstrap used to register a "terminal-local" manual cloud.
+    # Newer versions use the built-in "localhost" LXD cloud instead, but
+    # a stale "terminal-local" registration from an older run should go.
+    juju remove-cloud terminal-local --client 2>/dev/null || true
+
+    # Remove any stored credentials for the localhost LXD cloud. These
+    # are what made `juju bootstrap` fail with "credentials not found"
+    # after the trust store was manually cleaned.
+    juju remove-credential localhost juju 2>/dev/null || true
+fi
+
+# Remove the temporary cloud definition file used by the old manual
+# provider path.
+rm -f ./terminal-local-cloud.yaml 2>/dev/null || true
+
+echo "  -> Residual Juju cloud state removed."
 
 # ------------------------------------------------------------------------------
 # 9. Remove Python virtual environment
@@ -288,12 +333,23 @@ find . \
 # 14. Final verification
 # ------------------------------------------------------------------------------
 
-echo "[*] Verifying Juju controller removal..."
+echo "[*] Verifying Juju cleanup..."
 
-if sudo lxc info "$CONTROLLER_VM" >/dev/null 2>&1; then
-    echo "[!] WARNING: Controller VM still exists: $CONTROLLER_VM"
+remaining_containers=$(sudo lxc list --format csv 2>/dev/null \
+    | awk -F, '$1 ~ /^juju-/ {print $1}' | wc -l)
+if [ "$remaining_containers" -gt 0 ]; then
+    echo "[!] WARNING: $remaining_containers Juju container(s) still present:"
+    sudo lxc list --format csv 2>/dev/null | awk -F, '$1 ~ /^juju-/ {print "    " $1}'
 else
-    echo "  -> Controller VM removed."
+    echo "  -> All Juju containers removed."
+fi
+
+remaining_trust=$(sudo lxc config trust list --format csv 2>/dev/null \
+    | awk -F, '$2=="juju"' | wc -l)
+if [ "$remaining_trust" -gt 0 ]; then
+    echo "[!] WARNING: stale 'juju' trust entry still present in LXD."
+else
+    echo "  -> No stale Juju trust entries in LXD."
 fi
 
 if sudo lxc profile show "$CONTROLLER_PROFILE" >/dev/null 2>&1; then
