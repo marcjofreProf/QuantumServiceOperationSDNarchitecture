@@ -8,10 +8,27 @@ set -eo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
+# Load the shared deployment config written by the bootstraps so the
+# controller IP and node identity stay consistent across all three
+# repositories. Values already set in the environment win over the file.
+QUANTUM_SDN_CONF="${HOME}/.quantum-sdn/config.env"
+if [ -f "$QUANTUM_SDN_CONF" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in ''|\#*) continue ;; esac
+        if [ -z "${!k:-}" ]; then
+            printf -v "$k" '%s' "$v"
+            export "$k"
+        fi
+    done < "$QUANTUM_SDN_CONF"
+fi
+
+CONTROLLER_HOST="${CONTROLLER_HOST:-172.21.2.23}"
+QUANTUM_NODE_IP="${QUANTUM_NODE_IP:-172.21.128.254}"
+
 CONTROLLER_NAME="terminal-controller"
 MODEL_NAME="terminal-model"
 APP_NAME="quantum-terminal"
-RESTCONF_ENDPOINT="http://10.0.0.2:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service"
+RESTCONF_ENDPOINT="http://${CONTROLLER_HOST}:8181/restconf/data/example-quantum-switching-terminal-service:quantum-services/cross-connect-service"
 TEST_FAILED=0
 
 echo "=================================================================="
@@ -35,7 +52,7 @@ echo -e "\n[*] [1/4] Triggering create-cross-connect action on ${UNIT_NAME}..."
 
 CONNECT_OUTPUT=$(juju run "$UNIT_NAME" create-cross-connect \
   service-id="example-qservice-opt-01" \
-  target-node-ip="10.0.0.254" \
+  target-node-ip="${QUANTUM_NODE_IP}" \
   ingress-port=1 \
   egress-port=2 \
   admin-state="ENABLED" \
