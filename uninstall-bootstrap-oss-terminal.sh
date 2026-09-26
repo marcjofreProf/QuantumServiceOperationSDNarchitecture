@@ -302,6 +302,31 @@ else
     echo "  -> Controller profile removed."
 fi
 
+# ------------------------------------------------------------------------------
+# 15. Remove shared deployment configuration
+#
+# The bootstrap writes CONTROLLER_HOST / QUANTUM_NODE_ID / QUANTUM_NODE_IP to
+# ~/.quantum-sdn/config.env. The same file is used by the controller and node
+# bootstraps, so its removal is guarded by an env var: only delete it when the
+# user explicitly asks, to avoid surprising a machine that also runs one of
+# the other repositories.
+#
+# To remove it:
+#   REMOVE_QUANTUM_SDN_CONF=yes ./uninstall-bootstrap-oss-terminal.sh
+# ------------------------------------------------------------------------------
+
+if [ "${REMOVE_QUANTUM_SDN_CONF:-no}" = "yes" ]; then
+    if [ -d "${HOME}/.quantum-sdn" ]; then
+        echo "[*] Removing shared deployment config..."
+        rm -rf "${HOME}/.quantum-sdn"
+        echo "  -> ${HOME}/.quantum-sdn removed."
+    else
+        echo "[*] Shared deployment config not present. Skipping."
+    fi
+else
+    echo "[*] Shared deployment config preserved. Set REMOVE_QUANTUM_SDN_CONF=yes to remove it."
+fi
+
 echo "=================================================================="
 echo "[+] Uninstall complete!"
 echo "[+] Juju controller and its LXD resources removed."
