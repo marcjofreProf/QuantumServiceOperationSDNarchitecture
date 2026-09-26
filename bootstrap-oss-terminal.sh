@@ -328,6 +328,63 @@ fi
 echo "  -> Local SSH connectivity is working."
 echo "  -> SSH key configured for Juju: $JUJU_SSH_KEY"
 
+# 3. Preflight cleanup of stale Juju / LXD state
+#
+# A previous bootstrap that failed or was interrupted can leave two kinds
+# of stale state that block the next run:
+#
+#   1. An LXD client certificate named "juju" whose controller was never
+#      fully registered. Juju tries to add the same certificate again and
+#      fails with "This identity entry already exists".
+#   2. An orphaned juju-* LXD container from a partial bootstrap.
+#
+# This preflight removes both, but only when the controller is NOT
+# registered with the Juju client. If a valid controller is registered,
+# nothing is touched — that trust entry and container belong to it.
+echo "[*] Checking for stale Juju / LXD state..."
+
+STALE_JUJU_TRUST=false
+STALE_JUJU_CONTAINER=false
+
+if command -v juju >/dev/null 2>&1 && ! juju controllers 2>/dev/null | grep -q "terminal-controller"; then
+    if sudo lxc config trust list --format csv 2>/dev/null | awk -F, '$2=="juju"' | grep -q .; then
+        STALE_JUJU_TRUST=true
+    fi
+    if sudo lxc list --format csv 2>/dev/null | awk -F, '$1 ~ /^juju-/' | grep -q .; then
+        STALE_JUJU_CONTAINER=true
+    fi
+fi
+
+if [ "$STALE_JUJU_TRUST" = true ]; then
+    echo "  -> Removing stale LXD trust entry for Juju..."
+    while read -r fp; do
+        [ -n "$fp" ] && sudo lxc config trust remove "$fp" 2>/dev/null || true
+    done < <(sudo lxc config trust list --format csv 2>/dev/null | awk -F, '$2=="juju" {print $4}')
+    echo "     Stale trust entry removed."
+fi
+
+if [ "$STALE_JUJU_CONTAINER" = true ]; then
+    echo "  -> Removing orphaned Juju LXD containers..."
+    while read -r name; do
+        [ -n "$name" ] && sudo lxc delete "$name" --force 2>/dev/null || true
+    done < <(sudo lxc list --format csv 2>/dev/null | awk -F, '$1 ~ /^juju-/ {print $1}')
+    echo "     Orphaned containers removed."
+fi
+
+if [ "$STALE_JUJU_TRUST" = false ] && [ "$STALE_JUJU_CONTAINER" = false ]; then
+    echo "  -> No stale Juju / LXD state found."
+fi
+
+# Also clean up the terminal-local cloud registration if it survived from
+# an earlier version of this script that used the manual provider.
+if command -v juju >/dev/null 2>&1; then
+    if juju clouds --client 2>/dev/null | grep -q "terminal-local"; then
+        echo "  -> Removing stale 'terminal-local' cloud registration..."
+        juju remove-cloud terminal-local --client 2>/dev/null || true
+    fi
+fi
+rm -f ./terminal-local-cloud.yaml 2>/dev/null || true
+
 # 3. Canonical Juju & Charmcraft Tooling Check / Auto-Install
 echo "[*] Verifying Canonical Juju tooling..."
 
