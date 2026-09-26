@@ -363,36 +363,12 @@ fi
 echo "[*] Verifying Juju Controller..."
 CONTROLLER_NAME="terminal-controller"
 
-# Run the Juju controller directly on the WSL host using Juju's
-# unmanaged/manual provider rather than an LXD container or VM.
+# The Juju controller runs in an LXD container on the WSL host. The
+# built-in "localhost" cloud is used directly; no manual-cloud
+# registration is needed.
 JUJU_BOOTSTRAP_BASE="ubuntu@24.04"
-CLOUD_NAME="terminal-local"
 
-echo "  -> Juju controller bootstrap mode: local WSL host"
-
-# Juju's unmanaged/manual provider connects to an existing machine over SSH.
-# Define the WSL host itself as the bootstrap endpoint.
-JUJU_CLOUD_FILE="./terminal-local-cloud.yaml"
-
-cat > "$JUJU_CLOUD_FILE" <<EOF
-clouds:
-  ${CLOUD_NAME}:
-    type: manual
-    endpoint: ${USER}@127.0.0.1
-    regions:
-      default: {}
-EOF
-
-if juju show-cloud "$CLOUD_NAME" --client &>/dev/null; then
-    echo "  -> Local Juju cloud '$CLOUD_NAME' is already registered."
-else
-    echo "  -> Registering local unmanaged Juju cloud..."
-    juju add-cloud "$CLOUD_NAME" --file "$JUJU_CLOUD_FILE" --client || {
-        echo "[!] Failed to register the local Juju cloud."
-        exit 1
-    }
-    echo "  -> Local Juju cloud '$CLOUD_NAME' registered successfully."
-fi
+echo "  -> Juju controller bootstrap mode: LXD (localhost)"
 
 wait_for_juju_controller() {
     local attempts="${1:-30}"
@@ -424,22 +400,18 @@ else
 
     echo "  -> No registered controller found; preparing local Juju bootstrap..."
     juju clouds --client --format yaml
-    echo "  -> Bootstrapping local controller on WSL host..."
-    echo "     Cloud:      $CLOUD_NAME"
+    echo "  -> Bootstrapping controller on LXD cloud 'localhost'..."
     echo "     Controller: $CONTROLLER_NAME"
-    echo "     Host:       127.0.0.1"
-    echo "     User:       $USER"
-    echo "     SSH key:    $JUJU_SSH_KEY"
+    echo "     Base:       $JUJU_BOOTSTRAP_BASE"
     echo
-    juju bootstrap --bootstrap-base="$JUJU_BOOTSTRAP_BASE" --bootstrap-constraints="$JUJU_BOOTSTRAP_CONSTRAINTS" localhost "$CONTROLLER_NAME" || {
+    juju bootstrap --bootstrap-base="$JUJU_BOOTSTRAP_BASE" localhost "$CONTROLLER_NAME" || {
         echo "[!] Failed to bootstrap Juju controller."
         exit 1
     }
     echo "  -> Juju bootstrap completed successfully."
 fi
 
-# The Juju controller runs directly on the WSL host. Its Juju services are
-# managed by systemd and therefore follow the WSL systemd lifecycle.
+# The Juju controller runs inside an LXD container on the WSL host.
 echo "[*] Verifying Juju controller container..."
 if ! lxc list 2>/dev/null | grep -q "juju-"; then
     echo "[!] Juju controller LXD container could not be found."
@@ -593,8 +565,8 @@ echo "    [OK] gNMI stubs generated in ${GNMI_PROTO_DIR}/"
 # =============================================================================
 echo "[*] Verifying reboot/power-cycle persistence..."
 
-# The Juju controller runs directly on the WSL host. Verify that systemd is
-# active and that Juju controller services are present.
+# The Juju controller runs inside an LXD container. Verify that systemd is
+# active and that the controller container is present.
 SYSTEMD_ACTIVE=false
 if [ "$(ps -p 1 -o comm=)" = "systemd" ]; then
     SYSTEMD_ACTIVE=true
