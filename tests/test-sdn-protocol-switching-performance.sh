@@ -385,14 +385,20 @@ run_lifecycle_benchmark() {
 
         t_conn=$(exec_connect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
 
+        sleep 1 # added sleep to not carry over the measured times in the following process
+        
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
             t_stat=$(exec_gnmi_op "GET" "")
         fi
 
+        sleep 1 # added sleep to not carry over the measured times in the following process
+
         t_disc=$(exec_disconnect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
 
+        sleep 1 # added sleep to not carry over the measured times in the following process
+        
         if [ "$t_conn" != "FAILED" ] && [ "$t_stat" != "FAILED" ] && [ "$t_disc" != "FAILED" ]; then
             t_total=$((t_conn + t_stat + t_disc))
         else
