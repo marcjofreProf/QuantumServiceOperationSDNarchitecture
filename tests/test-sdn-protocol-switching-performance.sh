@@ -432,7 +432,7 @@ wait_sb_state() {
     local expected="$1"
     local timeout_ms="${2:-$SB_CONFIRM_TIMEOUT_MS}"
     if [ -z "$SB_DAEMON_PID" ] || [ -z "$expected" ]; then echo "-"; return 0; fi
-    if ! kill -0 "$SB_DAEMON_PID" 2>/dev/null; then echo "ERROR|probe-dead"; return 0; fi
+    if ! kill -0 "$SB_DAEMON_PID" 2>/dev/null; then echo "DEAD"; return 0; fi
     local start_t end_t resp
     start_t=$(get_time_ms)
     while :; do
@@ -441,7 +441,7 @@ wait_sb_state() {
         case "$resp" in
             PRESENT) end_t=$(get_time_ms); echo $((end_t - start_t)); return 0 ;;
             ABSENT)  : ;;
-            ERROR*)  echo "$resp"; return 0 ;;
+            ERROR*)  echo "ERR"; return 0 ;;
             *)       echo "ERROR|bad-response:${resp}"; return 0 ;;
         esac
         end_t=$(get_time_ms)
