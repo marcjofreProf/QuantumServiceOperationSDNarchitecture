@@ -608,6 +608,12 @@ else
         pyyaml
 fi
 
+# Required by the southbound confirmation probes
+# (tests/sb_probe_netconf.py). Installed unconditionally so the probes
+# work even when requirements.txt does not list it.
+"$VENV_PIP" install ncclient
+"$VENV_PYTHON" -c "import ncclient; print('  -> ncclient OK')"
+
 # 8. Compile Protobuf Schemas
 PROTO_DIR="src/api/proto"
 GRPC_OUT_DIR="src/api/grpc"
@@ -695,6 +701,43 @@ for d in github github/com github/com/openconfig github/com/openconfig/gnmi \
 done
 
 echo "    [OK] gNMI stubs generated in ${GNMI_PROTO_DIR}/"
+
+echo "    [OK] gNMI stubs generated in ${GNMI_PROTO_DIR}/"
+
+# =============================================================================
+# 10c. Generate the custom gNOI switching stub for the SB probe
+#
+# tests/sb_probe_gnoi.py talks to the node's unified gRPC agent over the
+# custom QuantumGnoiSwitchingService (see bootstrap-node.sh). The .proto
+# is reproduced here rather than copied from the node, because the node
+# is not assumed to be reachable from the controller host at bootstrap
+# time. The content must stay in lockstep with the definition in
+# bootstrap-node.sh — if that one changes, update this one too.
+# =============================================================================
+echo "[*] Generating custom gNOI switching stub..."
+
+GNOI_SWITCHING_PROTO="${GNMI_PROTO_DIR}/quantum_gnoi_switching.proto"
+
+cat > "$GNOI_SWITCHING_PROTO" <<'GNOIEOF'
+syntax = "proto3";
+package quantum.gnoi.switching.v1;
+service QuantumGnoiSwitchingService {
+  rpc SetCrossConnect (CrossConnectRequest) returns (CrossConnectResponse);
+  rpc GetCrossConnectStatus (StatusRequest) returns (StatusResponse);
+}
+message CrossConnectRequest { bool state = 1; }
+message CrossConnectResponse { bool success = 1; string message = 2; }
+message StatusRequest {}
+message StatusResponse { bool is_connected = 1; string switch_type = 2; }
+GNOIEOF
+
+"$VENV_PYTHON" -m grpc_tools.protoc \
+    -I"${GNMI_PROTO_DIR}" \
+    --python_out="${GNMI_PROTO_DIR}" \
+    --grpc_python_out="${GNMI_PROTO_DIR}" \
+    "${GNOI_SWITCHING_PROTO}"
+
+echo "    [OK] gNOI switching stub generated in ${GNMI_PROTO_DIR}/"
 
 # =============================================================================
 # 11. Final Persistence / Reboot Safety Verification
