@@ -275,11 +275,12 @@ done
 # The tracked proto/ directory (if any) is left alone except for these
 # specific downloaded artifacts.
 echo "[*] Removing downloaded OpenConfig gNMI proto sources..."
-rm -f  "proto/gnmi.proto"            2>/dev/null || true
-rm -f  "proto/gnmi_ext.proto"        2>/dev/null || true
-rm -rf "proto/github.com"            2>/dev/null || true
-rm -rf "proto/github"                2>/dev/null || true
-rm -f  "proto/__init__.py"           2>/dev/null || true
+rm -f  "proto/gnmi.proto"                    2>/dev/null || true
+rm -f  "proto/gnmi_ext.proto"                2>/dev/null || true
+rm -f  "proto/quantum_gnoi_switching.proto"  2>/dev/null || true
+rm -rf "proto/github.com"                    2>/dev/null || true
+rm -rf "proto/github"                        2>/dev/null || true
+rm -f  "proto/__init__.py"                   2>/dev/null || true
 
 # ------------------------------------------------------------------------------
 # 11. Clean compiled YANG tree files
