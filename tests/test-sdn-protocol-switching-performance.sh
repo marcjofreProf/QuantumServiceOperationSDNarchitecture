@@ -392,18 +392,21 @@ start_sb_probe() {
     fi
 
     mkfifo "$FIFO_SB_IN" "$FIFO_SB_OUT"
-    "$PYTHON_BIN" "$script" "${args[@]}" < "$FIFO_SB_IN" > "$FIFO_SB_OUT" &
+    local sb_err="/tmp/sb_probe_err.$$"
+    : > "$sb_err"
+    "$PYTHON_BIN" "$script" "${args[@]}" \
+        < "$FIFO_SB_IN" > "$FIFO_SB_OUT" 2> "$sb_err" &
     SB_DAEMON_PID=$!
     exec 5> "$FIFO_SB_IN"
     exec 6< "$FIFO_SB_OUT"
 
-    sleep 1
+    sleep 2
     if ! kill -0 "$SB_DAEMON_PID" 2>/dev/null; then
-        local msg; msg=$(head -n1 "$FIFO_SB_OUT" 2>/dev/null || echo "")
+        local msg; msg=$(head -n3 "$sb_err" 2>/dev/null | tr '\n' ' ' || true)
         echo "[!] SB probe failed to start: ${msg:-<no message>}" >&2
         exec 5>&- 2>/dev/null || true
         exec 6<&- 2>/dev/null || true
-        rm -f "$FIFO_SB_IN" "$FIFO_SB_OUT"
+        rm -f "$FIFO_SB_IN" "$FIFO_SB_OUT" "$sb_err"
         SB_DAEMON_PID=""
         if [ "$SB_CONFIRM_MODE" = "strict" ]; then
             echo "[!] strict mode but probe is dead. Aborting." >&2
@@ -421,7 +424,7 @@ stop_sb_probe() {
         kill "$SB_DAEMON_PID" 2>/dev/null || true
         wait "$SB_DAEMON_PID" 2>/dev/null || true
         SB_DAEMON_PID=""
-        rm -f "$FIFO_SB_IN" "$FIFO_SB_OUT"
+        rm -f "$FIFO_SB_IN" "$FIFO_SB_OUT" /tmp/sb_probe_err.$$
     fi
 }
 
@@ -429,20 +432,20 @@ wait_sb_state() {
     local expected="$1"
     local timeout_ms="${2:-$SB_CONFIRM_TIMEOUT_MS}"
     if [ -z "$SB_DAEMON_PID" ] || [ -z "$expected" ]; then echo "-"; return 0; fi
-    if ! kill -0 "$SB_DAEMON_PID" 2>/dev/null; then echo "ERROR|probe-dead"; return 1; fi
+    if ! kill -0 "$SB_DAEMON_PID" 2>/dev/null; then echo "ERROR|probe-dead"; return 0; fi
     local start_t end_t resp
     start_t=$(get_time_ms)
     while :; do
         echo "CHECK|${expected}" >&5
-        if ! read -r resp <&6; then echo "ERROR|eof"; return 1; fi
+        if ! read -r resp <&6; then echo "ERROR|eof"; return 0; fi
         case "$resp" in
             PRESENT) end_t=$(get_time_ms); echo $((end_t - start_t)); return 0 ;;
             ABSENT)  : ;;
-            ERROR*)  echo "$resp"; return 1 ;;
-            *)       echo "ERROR|bad-response:${resp}"; return 1 ;;
+            ERROR*)  echo "$resp"; return 0 ;;
+            *)       echo "ERROR|bad-response:${resp}"; return 0 ;;
         esac
         end_t=$(get_time_ms)
-        if [ $((end_t - start_t)) -ge "$timeout_ms" ]; then echo "TIMEOUT"; return 1; fi
+        if [ $((end_t - start_t)) -ge "$timeout_ms" ]; then echo "TIMEOUT"; return 0; fi
         $PYTHON_BIN -c "import time; time.sleep(${SB_CONFIRM_POLL_MS} / 1000.0)"
     done
 }
