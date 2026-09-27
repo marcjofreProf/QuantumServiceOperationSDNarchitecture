@@ -67,6 +67,14 @@ CONTROLLER_HOST="${CONTROLLER_HOST:-172.21.2.23}"
 # from the node IP loaded above so a single config drives both the
 # topo entity name and the direct connection target.
 TARGET_DEVICE_GNMI_ADDR="${TARGET_DEVICE_GNMI_ADDR:-${QUANTUM_NODE_IP:-172.21.128.254}:50051}"
+# --- Southbound confirmation ---
+SB_CONFIRM_MODE="${SB_CONFIRM_MODE:-warn}"        # off | warn | strict
+SB_CONFIRM_TIMEOUT_MS="${SB_CONFIRM_TIMEOUT_MS:-5000}"
+SB_CONFIRM_POLL_MS="${SB_CONFIRM_POLL_MS:-50}"
+SB_GNMI_TARGET="${SB_GNMI_TARGET:-${TARGET_NODE_IP}:50051}"
+SB_GNOI_TARGET="${SB_GNOI_TARGET:-${TARGET_NODE_IP}:50051}"
+SB_NETCONF_HOST="${SB_NETCONF_HOST:-${TARGET_NODE_IP}}"
+SB_NETCONF_PORT="${SB_NETCONF_PORT:-8300}"
 
 case "$ONOS_GNMI_TARGET_MODE" in
     controller)
@@ -92,9 +100,12 @@ RESULTS_FILE="/tmp/sdn_benchmark_raw.txt"
 SUMMARY_FILE="/tmp/sdn_benchmark_summary.txt"
 FIFO_IN="/tmp/gnmi_fifo_in_$$"
 FIFO_OUT="/tmp/gnmi_fifo_out_$$"
+FIFO_SB_IN="/tmp/gnmi_sb_fifo_in_$$"
+FIFO_SB_OUT="/tmp/gnmi_sb_fifo_out_$$"
 GNMI_DEBUG_LOG="/tmp/gnmi_debug.log"
 
-rm -f "$RESULTS_FILE" "$SUMMARY_FILE" "$FIFO_IN" "$FIFO_OUT" "$GNMI_DEBUG_LOG"
+rm -f "$RESULTS_FILE" "$SUMMARY_FILE" "$FIFO_IN" "$FIFO_OUT" \
+      "$FIFO_SB_IN" "$FIFO_SB_OUT" "$GNMI_DEBUG_LOG"
 
 # Python binary path setup
 PYTHON_BIN="python3"
@@ -192,6 +203,25 @@ else
     preflight_failed=1
 fi
 
+# 4b. Southbound probe endpoints
+if [ "$SB_CONFIRM_MODE" = "off" ]; then
+    echo "    [--] SB confirmation disabled (SB_CONFIRM_MODE=off)"
+else
+    for ep in "$SB_GNMI_TARGET" "$SB_GNOI_TARGET"; do
+        h="${ep%%:*}"; p="${ep##*:}"
+        if nc -z "$h" "$p" 2>/dev/null; then
+            echo "    [OK] SB probe endpoint ${ep} reachable"
+        else
+            echo "    [--] SB probe endpoint ${ep} unreachable"
+        fi
+    done
+    if nc -z "$SB_NETCONF_HOST" "$SB_NETCONF_PORT" 2>/dev/null; then
+        echo "    [OK] SB probe endpoint ${SB_NETCONF_HOST}:${SB_NETCONF_PORT} reachable"
+    else
+        echo "    [--] SB probe endpoint ${SB_NETCONF_HOST}:${SB_NETCONF_PORT} unreachable"
+    fi
+fi
+
 # 5. RESTCONF gateway (informational only)
 # Probe the real data URL the benchmark uses, and treat any HTTP reply
 # (1xx–5xx) as "reachable". A 404/405 on /restconf/ root is normal and
@@ -271,13 +301,23 @@ DAEMON_PID=$!
 exec 3> "$FIFO_IN"
 exec 4< "$FIFO_OUT"
 
+SB_DAEMON_PID=""
+
 cleanup() {
     echo "QUIT" >&3 2>/dev/null || true
+    if [ -n "$SB_DAEMON_PID" ]; then
+        echo "QUIT" >&5 2>/dev/null || true
+    fi
     exec 3>&- 2>/dev/null || true
     exec 4<&- 2>/dev/null || true
-    rm -f "$FIFO_IN" "$FIFO_OUT"
+    exec 5>&- 2>/dev/null || true
+    exec 6<&- 2>/dev/null || true
+    rm -f "$FIFO_IN" "$FIFO_OUT" "$FIFO_SB_IN" "$FIFO_SB_OUT"
     if [ -n "$DAEMON_PID" ]; then
         kill "$DAEMON_PID" 2>/dev/null || true
+    fi
+    if [ -n "$SB_DAEMON_PID" ]; then
+        kill "$SB_DAEMON_PID" 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
@@ -315,6 +355,96 @@ exec_gnmi_op() {
         return
     fi
     echo "$res"
+}
+
+
+# --- SB probe lifecycle -------------------------------------------------
+
+SB_EXPECT_CONNECT=""
+SB_EXPECT_DISCONNECT=""
+
+start_sb_probe() {
+    local sb_proto="$1"
+    SB_DAEMON_PID=""
+    SB_EXPECT_CONNECT=""
+    SB_EXPECT_DISCONNECT=""
+
+    if [ "$SB_CONFIRM_MODE" = "off" ]; then return 0; fi
+
+    local script args=()
+    case "$sb_proto" in
+        NETCONF) script="./tests/sb_probe_netconf.py"
+                 args=("$SB_NETCONF_HOST" "$SB_NETCONF_PORT")
+                 SB_EXPECT_CONNECT="true"; SB_EXPECT_DISCONNECT="false" ;;
+        gNOI)    script="./tests/sb_probe_gnoi.py"
+                 args=("$SB_GNOI_TARGET")
+                 SB_EXPECT_CONNECT="true"; SB_EXPECT_DISCONNECT="false" ;;
+        gNMI)    script="./tests/sb_probe.py"
+                 args=("$SB_GNMI_TARGET")
+                 SB_EXPECT_CONNECT="enabled"; SB_EXPECT_DISCONNECT="disabled" ;;
+        *)       echo "[!] unknown sb_proto '$sb_proto'" >&2
+                 SB_CONFIRM_MODE="off"; return 0 ;;
+    esac
+
+    if [ ! -f "$script" ]; then
+        echo "[!] $script not found; disabling SB confirmation" >&2
+        SB_CONFIRM_MODE="off"; return 0
+    fi
+
+    mkfifo "$FIFO_SB_IN" "$FIFO_SB_OUT"
+    "$PYTHON_BIN" "$script" "${args[@]}" < "$FIFO_SB_IN" > "$FIFO_SB_OUT" &
+    SB_DAEMON_PID=$!
+    exec 5> "$FIFO_SB_IN"
+    exec 6< "$FIFO_SB_OUT"
+
+    sleep 1
+    if ! kill -0 "$SB_DAEMON_PID" 2>/dev/null; then
+        local msg; msg=$(head -n1 "$FIFO_SB_OUT" 2>/dev/null || echo "")
+        echo "[!] SB probe failed to start: ${msg:-<no message>}" >&2
+        exec 5>&- 2>/dev/null || true
+        exec 6<&- 2>/dev/null || true
+        rm -f "$FIFO_SB_IN" "$FIFO_SB_OUT"
+        SB_DAEMON_PID=""
+        if [ "$SB_CONFIRM_MODE" = "strict" ]; then
+            echo "[!] strict mode but probe is dead. Aborting." >&2
+            exit 1
+        fi
+        SB_CONFIRM_MODE="off"
+    fi
+}
+
+stop_sb_probe() {
+    if [ -n "$SB_DAEMON_PID" ]; then
+        echo "QUIT" >&5 2>/dev/null || true
+        exec 5>&- 2>/dev/null || true
+        exec 6<&- 2>/dev/null || true
+        kill "$SB_DAEMON_PID" 2>/dev/null || true
+        wait "$SB_DAEMON_PID" 2>/dev/null || true
+        SB_DAEMON_PID=""
+        rm -f "$FIFO_SB_IN" "$FIFO_SB_OUT"
+    fi
+}
+
+wait_sb_state() {
+    local expected="$1"
+    local timeout_ms="${2:-$SB_CONFIRM_TIMEOUT_MS}"
+    if [ -z "$SB_DAEMON_PID" ] || [ -z "$expected" ]; then echo "-"; return 0; fi
+    if ! kill -0 "$SB_DAEMON_PID" 2>/dev/null; then echo "ERROR|probe-dead"; return 1; fi
+    local start_t end_t resp
+    start_t=$(get_time_ms)
+    while :; do
+        echo "CHECK|${expected}" >&5
+        if ! read -r resp <&6; then echo "ERROR|eof"; return 1; fi
+        case "$resp" in
+            PRESENT) end_t=$(get_time_ms); echo $((end_t - start_t)); return 0 ;;
+            ABSENT)  : ;;
+            ERROR*)  echo "$resp"; return 1 ;;
+            *)       echo "ERROR|bad-response:${resp}"; return 1 ;;
+        esac
+        end_t=$(get_time_ms)
+        if [ $((end_t - start_t)) -ge "$timeout_ms" ]; then echo "TIMEOUT"; return 1; fi
+        $PYTHON_BIN -c "import time; time.sleep(${SB_CONFIRM_POLL_MS} / 1000.0)"
+    done
 }
 
 check_step() {
@@ -360,6 +490,8 @@ run_lifecycle_benchmark() {
     echo "  Target: ${TARGET_DEVICE} (${TARGET_NODE_IP}) | ${ITERATIONS} Full Trials"
     echo "=================================================================="
 
+    start_sb_probe "$sb_proto"
+
     # 1. Unmeasured Pre-Warmup Run
     echo -n "[*] Pre-Warmup Lifecycle Run... "
     wp_conn=$(exec_connect "$mode_id" "$nb_proto" "$sb_proto" "warmup")
@@ -379,11 +511,14 @@ run_lifecycle_benchmark() {
 
     # 2. Measured Iterations
     local conn_list="" stat_list="" disc_list="" total_list=""
+    local sb_conn_list="" sb_disc_list=""
 
     for ((i=1; i<=ITERATIONS; i++)); do
         local service_id="qservice-m${mode_id}-i${i}"
 
         t_conn=$(exec_connect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
+
+        t_sb_conn=$(wait_sb_state "$SB_EXPECT_CONNECT")
 
         sleep 1 # added sleep to not carry over the measured times in the following process
         
@@ -397,9 +532,23 @@ run_lifecycle_benchmark() {
 
         t_disc=$(exec_disconnect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
 
+        if [[ "$t_sb_conn" =~ ^[0-9]+$ ]]; then
+            t_sb_disc=$(wait_sb_state "$SB_EXPECT_DISCONNECT")
+        else
+            t_sb_disc="$t_sb_conn"
+        fi
+
         sleep 1 # added sleep to not carry over the measured times in the following process
         
-        if [ "$t_conn" != "FAILED" ] && [ "$t_stat" != "FAILED" ] && [ "$t_disc" != "FAILED" ]; then
+        local fail_total=0
+        [ "$t_conn" = "FAILED" ] && fail_total=1
+        [ "$t_stat" = "FAILED" ] && fail_total=1
+        [ "$t_disc" = "FAILED" ] && fail_total=1
+        if [ "$SB_CONFIRM_MODE" = "strict" ]; then
+            case "$t_sb_conn" in TIMEOUT|ERROR*|eof) fail_total=1 ;; esac
+            case "$t_sb_disc" in TIMEOUT|ERROR*|eof) fail_total=1 ;; esac
+        fi
+        if [ "$fail_total" -eq 0 ]; then
             t_total=$((t_conn + t_stat + t_disc))
         else
             t_total="FAILED"
@@ -409,15 +558,17 @@ run_lifecycle_benchmark() {
         stat_list="${stat_list} ${t_stat}"
         disc_list="${disc_list} ${t_disc}"
         total_list="${total_list} ${t_total}"
+        sb_conn_list="${sb_conn_list} ${t_sb_conn}"
+        sb_disc_list="${sb_disc_list} ${t_sb_disc}"
 
         if [ -t 1 ]; then
             # Interactive: overwrite the same line with \r + right-pad to
             # erase any trailing characters from the previous longer line.
-            printf "\r  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | Total: %5sms" \
-                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$t_total"
+            printf "\r  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %5sms | SB-D: %5sms | Total: %5sms" \
+                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$t_sb_conn" "$t_sb_disc" "$t_total"
         else
-            printf "  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | Total: %5sms\n" \
-                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$t_total"
+            printf "  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %5sms | SB-D: %5sms | Total: %5sms\n" \
+                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$t_sb_conn" "$t_sb_disc" "$t_total"
         fi
         sleep "$INTERVAL"
     done
@@ -427,13 +578,15 @@ run_lifecycle_benchmark() {
     if [ -t 1 ]; then
         printf "\n"
     fi
-
+    stop_sb_probe
     IFS='|' read -r c_avg c_sd c_min c_max <<< "$(calc_stats $conn_list)"
     IFS='|' read -r s_avg s_sd s_min s_max <<< "$(calc_stats $stat_list)"
     IFS='|' read -r d_avg d_sd d_min d_max <<< "$(calc_stats $disc_list)"
+    IFS='|' read -r b_avg b_sd b_min b_max <<< "$(calc_stats $sb_conn_list)"
+    IFS='|' read -r e_avg e_sd e_min e_max <<< "$(calc_stats $sb_disc_list)"
     IFS='|' read -r t_avg t_sd t_min t_max <<< "$(calc_stats $total_list)"
 
-    echo "${mode_id}|${mode_name}|${c_avg}±${c_sd}|${s_avg}±${s_sd}|${d_avg}±${d_sd}|${t_avg}±${t_sd}" >> "$SUMMARY_FILE"
+    echo "${mode_id}|${mode_name}|${c_avg}±${c_sd}|${s_avg}±${s_sd}|${d_avg}±${d_sd}|${b_avg}±${b_sd}|${e_avg}±${e_sd}|${t_avg}±${t_sd}" >> "$SUMMARY_FILE"
     echo ""
 }
 
@@ -450,10 +603,12 @@ echo "==========================================================================
 echo "                   SDN PROTOCOL BENCHMARK SUMMARY (${ITERATIONS} Full Lifecycle Trials)                  "
 echo "                     gNMI target mode: ${ONOS_GNMI_TARGET_MODE} (${ONOS_GNMI_TARGET})"
 echo "=========================================================================================================="
-printf "%-7s | %-20s | %-15s | %-15s | %-15s | %-15s\n" "Mode" "Path" "Connect (ms)" "Status (ms)" "Disconnect (ms)" "Total Cycle (ms)"
-echo "----------------------------------------------------------------------------------------------------------"
+printf "%-7s | %-20s | %-13s | %-11s | %-13s | %-10s | %-10s | %-13s\n" \
+    "Mode" "Path" "Connect (ms)" "Status (ms)" "Disconnect (ms)" "SB-C (ms)" "SB-D (ms)" "Total (ms)"
+echo "--------------------------------------------------------------------------------------------------------------------------------------"
 
-while IFS='|' read -r mid mname c_stat s_stat d_stat t_stat; do
-    printf "%-7s | %-20s | %-15s | %-15s | %-15s | %-15s\n" "Mode ${mid}" "${mname}" "${c_stat}" "${s_stat}" "${d_stat}" "${t_stat}"
+while IFS='|' read -r mid mname c_stat s_stat d_stat b_stat e_stat t_stat; do
+    printf "%-7s | %-20s | %-13s | %-11s | %-13s | %-10s | %-10s | %-13s\n" \
+        "Mode ${mid}" "${mname}" "${c_stat}" "${s_stat}" "${d_stat}" "${b_stat}" "${e_stat}" "${t_stat}"
 done < "$SUMMARY_FILE"
 echo "=========================================================================================================="
