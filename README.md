@@ -128,20 +128,15 @@ Utilized for intent-based provisioning by automatically translating orchestrator
 
 To evaluate and compare performance across both Northbound (RESTCONF vs. direct gNMI) and Southbound (NETCONF vs. gNOI) protocol paths, a dedicated statistical benchmarking tool is provided.
 
-The benchmark measures real lifecycle latency across multiple execution rounds and seamlessly supports execution against either physical hardware nodes or the in-cluster simulated target (devicesim-1).
+The benchmark measures real lifecycle latency across multiple execution rounds and seamlessly supports execution against either physical hardware nodes.
 
 a. Run against Physical Node Hardware:
 ```bash
 TARGET_DEVICE="quantum-node-1" TARGET_NODE_IP="quantum-node-1" ./tests/test-sdn-protocol-switching-performance.sh 10
 TARGET_DEVICE="quantum-node-1" TARGET_NODE_IP="quantum-node-1" ONOS_GNMI_TARGET_MODE=direct ./tests/test-sdn-protocol-switching-performance.sh 10
-```
-b. Run against Simulated Target (devicesim-1):
-```bash
-TARGET_DEVICE="devicesim-1" TARGET_NODE_IP="devicesim-1" ./tests/test-sdn-protocol-switching-performance.sh 10
-```
 
 Execution Particularities & Parameters:
-TARGET_DEVICE (Environment Variable): Specifies the ONOS topology target entity name. Set to quantum-node-1 for physical node testing, or devicesim-1 for local/in-cluster simulator testing.
+TARGET_DEVICE (Environment Variable): Specifies the ONOS topology target entity name. Set to quantum-node-1 for physical node testing.
 
 TARGET_NODE_IP (Environment Variable): Defines the network IP address of the target switching node (10.0.0.254 for physical hardware, or 127.0.0.1 / cluster IP for simulator).
 
