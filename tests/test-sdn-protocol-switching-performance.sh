@@ -667,11 +667,11 @@ run_lifecycle_benchmark() {
     if [ "$SB_CONFIRM_MODE" = "off" ] || [ "$b_avg" = "n/a" ]; then
         b_str="n/a"
         e_str="n/a"
-        x_str="${t_avg}±${t_sd}"
+        x_str="${t_avg} +/- ${t_sd}"
     else
-        b_str="${b_avg}±${b_sd}"
-        e_str="${e_avg}±${e_sd}"
-        x_str="${x_avg}±${x_sd}"
+        b_str="${b_avg} +/- ${b_sd}"
+        e_str="${e_avg} +/- ${e_sd}"
+        x_str="${x_avg} +/- ${x_sd}"
     fi
 
     echo "${mode_id}|${mode_name}|${c_avg} +/- ${c_sd}|${s_avg} +/- ${s_sd}|${d_avg} +/- ${d_sd}|${b_str}|${e_str}|${t_avg} +/- ${t_sd}|${x_str}" >> "$SUMMARY_FILE"
