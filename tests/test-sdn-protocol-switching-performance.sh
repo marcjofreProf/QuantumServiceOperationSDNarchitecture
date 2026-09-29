@@ -751,20 +751,20 @@ else
 fi
 echo
 
-printf "%-7s | %-20s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s\n" \
+printf "%-7s | %-20s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s\n" \
     "Mode" "Path" "NB Conn (ms)" "NB Stat (ms)" "NB Disc (ms)" "SB Conn (ms)" "SB Disc (ms)" "NB Total (ms)" "E2E (ms)"
 
 # Print a separator line as long as the header. Using awk to count the
 # header width is more robust than maintaining a hard-coded dash string.
 HEADER_WIDTH=$(
-  printf "%-7s | %-20s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s" \
+  printf "%-7s | %-20s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s" \
     "Mode" "Path" "NB Conn (ms)" "NB Stat (ms)" "NB Disc (ms)" "SB Conn (ms)" "SB Disc (ms)" "NB Total (ms)" "E2E (ms)" \
     | awk '{ print length($0) }'
 )
 printf -- '-%.0s' $(seq 1 "$HEADER_WIDTH"); echo
 
 while IFS='|' read -r mid mname c_stat s_stat d_stat b_stat e_stat t_stat x_stat; do
-    printf "%-7s | %-20s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s\n" \
+    printf "%-7s | %-20s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s\n" \
         "Mode ${mid}" "${mname}" "${c_stat}" "${s_stat}" "${d_stat}" "${b_stat}" "${e_stat}" "${t_stat}" "${x_stat}"
 done < "$SUMMARY_FILE"
 
