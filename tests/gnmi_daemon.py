@@ -111,14 +111,9 @@ def main():
 
     stub = gnmi_grpc.gNMIStub(channel)
 
-    def do_set(value, sb_hint=""):
+    def do_set(value):
         # The controller-quantum-switching model plugin exposes exactly one
         # writable leaf: /switching/state (enum: enabled | disabled).
-        #
-        # The shell script sends an arbitrary description string for the
-        # "connect" phase and "disabled" for the "disconnect" phase. Map
-        # anything that is not "disabled" to "enabled" so both phases are
-        # valid writes.
         enum_value = "disabled" if str(value).strip().lower() == "disabled" else "enabled"
 
         path = "/switching/state"
@@ -132,25 +127,25 @@ def main():
                 )
             ],
         )
-        md = [("southbound-protocol", sb_hint)] if sb_hint else []
         try:
-            stub.Set(req, timeout=15, metadata=md)
+            stub.Set(req, timeout=15)
         except Exception as e:
-            log(f"Set failed on [{path}] sb_hint={sb_hint}: {e}")
+            log(f"Set failed on [{path}]: {e}")
             raise
 
-    def do_get(sb_hint=""):
-        # Read back the same leaf the Set writes to.
+    def do_get():
+        # Read back the same leaf the Set writes to. No metadata: onos-config's
+        # gNMI Get handler rejects unknown metadata and returns an RpcError,
+        # which is what was producing FAILED for every Stat step.
         elems = [gnmi.PathElem(name=x) for x in
                  "/switching/state".strip("/").split("/") if x]
-        req = gnmi.SetRequest(
+        req = gnmi.GetRequest(
             prefix=gnmi.Path(target=device),
             path=[gnmi.Path(elem=elems)],
             type=gnmi.GetRequest.CONFIG,
             encoding=gnmi.Encoding.JSON_IETF,
         )
-        md = [("southbound-protocol", sb_hint)] if sb_hint else []
-        stub.Get(req, timeout=15, metadata=md)
+        stub.Get(req, timeout=15)
 
     while True:
         line = sys.stdin.readline()
