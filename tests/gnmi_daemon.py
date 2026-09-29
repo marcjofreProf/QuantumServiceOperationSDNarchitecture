@@ -28,13 +28,12 @@ Commands received on stdin, one per line:
 
 The third field (<sb-hint>) is accepted for wire compatibility with the
 benchmark script but is currently unused: onos-config routes southbound
-traffic by target name, not by gRPC metadata. See register-devices.sh
-for how southbound protocols are declared on the topo entity.
+traffic by target name, not by gRPC metadata, and its Get handler rejects
+unknown metadata with an RpcError.
 """
 import sys
 import os
 import time
-import json
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -68,7 +67,6 @@ def main():
     log(f"daemon starting target={target} device={device} tls_mode={tls_mode}")
 
     if tls_mode == "mtls":
-        # ---- mTLS against onos-config ----
         try:
             cert = open("/etc/onos/certs/client1.crt", "rb").read()
             key  = open("/etc/onos/certs/client1.key", "rb").read()
@@ -91,7 +89,6 @@ def main():
         channel = grpc.secure_channel(f"{host}:{port}", creds, options=options)
 
     elif tls_mode == "plain":
-        # ---- plaintext gRPC against the target device itself ----
         channel = grpc.insecure_channel(f"{host}:{port}")
 
     else:
@@ -135,9 +132,7 @@ def main():
             raise
 
     def do_get():
-        # Read back the same leaf the Set writes to. No metadata: onos-config's
-        # gNMI Get handler rejects unknown metadata and returns an RpcError,
-        # which is what was producing FAILED for every Stat step.
+        # Read back the same leaf the Set writes to.
         elems = [gnmi.PathElem(name=x) for x in
                  "/switching/state".strip("/").split("/") if x]
         req = gnmi.GetRequest(
@@ -156,11 +151,8 @@ def main():
         parts = line.strip().split("|")
         action = parts[0]
         raw_val = parts[1] if len(parts) > 1 else ""
-        # The third field (sb_hint) is still accepted on the wire so the
-        # shell script does not have to change, but it is intentionally
-        # not forwarded to onos-config: onos-config's gNMI Get handler
-        # rejects unknown metadata with an RpcError, and the Set handler
-        # ignores it anyway.
+        # Third field accepted for wire compatibility with the shell script,
+        # but not forwarded to onos-config (see module docstring).
         _sb_hint = parts[2].strip().upper() if len(parts) > 2 else ""
 
         try:
