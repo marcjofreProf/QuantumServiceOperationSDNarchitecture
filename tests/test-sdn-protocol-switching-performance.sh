@@ -540,7 +540,7 @@ exec_connect() {
     local service_desc="qservice-m${mode_id}-${sb_proto}-${service_id}"
 
     if [ "$nb_proto" == "RESTCONF" ]; then
-        time_exec "curl -s -X POST '${RESTCONF_GW_URL}' \
+        time_exec "curl -sf -X POST '${RESTCONF_GW_URL}' \
             -H 'Content-Type: application/json' \
             -H 'X-Southbound-Target: ${sb_proto}' \
             -d '{\"service-id\":\"${service_id}\",\"target-node\":\"${PAYLOAD_TARGET_DEVICE}\",\"target-node-ip\":\"${PAYLOAD_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\",\"name\":\"eth1\",\"description\":\"${service_desc}\"}'"
