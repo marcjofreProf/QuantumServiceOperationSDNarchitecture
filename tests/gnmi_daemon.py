@@ -123,10 +123,8 @@ def main():
 
         path = "/switching/state"
         elems = [gnmi.PathElem(name=x) for x in path.strip("/").split("/") if x]
-        sb_suffix = sb_hint.lower() if sb_hint else ""
-        target_name = f"{device}-{sb_suffix}" if sb_suffix else device
         req = gnmi.SetRequest(
-            prefix=gnmi.Path(target=target_name),
+            prefix=gnmi.Path(target=device),
             update=[
                 gnmi.Update(
                     path=gnmi.Path(elem=elems),
@@ -145,10 +143,8 @@ def main():
         # Read back the same leaf the Set writes to.
         elems = [gnmi.PathElem(name=x) for x in
                  "/switching/state".strip("/").split("/") if x]
-        sb_suffix = sb_hint.lower() if sb_hint else ""
-        target_name = f"{device}-{sb_suffix}" if sb_suffix else device
-        req = gnmi.GetRequest(
-            prefix=gnmi.Path(target=target_name),
+        req = gnmi.SetRequest(
+            prefix=gnmi.Path(target=device),
             path=[gnmi.Path(elem=elems)],
             type=gnmi.GetRequest.CONFIG,
             encoding=gnmi.Encoding.JSON_IETF,
