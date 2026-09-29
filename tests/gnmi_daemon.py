@@ -21,14 +21,15 @@ Two connection modes are supported, selected by the third CLI argument:
 Invocation:
     gnmi_daemon.py <host:port> <device-name> <mtls|plain>
 
-Commands received on stdin (one per line):
+Commands received on stdin, one per line:
     SET|<value>|<sb-hint>
     GET||<sb-hint>
     QUIT
 
-<sb-hint> is one of NETCONF | gNOI | gNMI (or empty). It is forwarded to
-onos-config via gRPC metadata as `southbound-protocol` so the controller
-plugin can pick the correct SB adapter for the transaction.
+The third field (<sb-hint>) is accepted for wire compatibility with the
+benchmark script but is currently unused: onos-config routes southbound
+traffic by target name, not by gRPC metadata. See register-devices.sh
+for how southbound protocols are declared on the topo entity.
 """
 import sys
 import os
@@ -155,14 +156,19 @@ def main():
         parts = line.strip().split("|")
         action = parts[0]
         raw_val = parts[1] if len(parts) > 1 else ""
-        sb_hint = parts[2].strip().upper() if len(parts) > 2 else ""
+        # The third field (sb_hint) is still accepted on the wire so the
+        # shell script does not have to change, but it is intentionally
+        # not forwarded to onos-config: onos-config's gNMI Get handler
+        # rejects unknown metadata with an RpcError, and the Set handler
+        # ignores it anyway.
+        _sb_hint = parts[2].strip().upper() if len(parts) > 2 else ""
 
         try:
             t0 = time.perf_counter()
             if action == "SET":
-                do_set(raw_val, sb_hint)
+                do_set(raw_val)
             elif action == "GET":
-                do_get(sb_hint)
+                do_get()
             elapsed = int((time.perf_counter() - t0) * 1000)
             print(f"{elapsed}")
         except Exception as e:
