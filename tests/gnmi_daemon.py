@@ -2,34 +2,32 @@
 """
 Persistent gNMI client for the SDN protocol benchmark.
 
-Reads commands from stdin, one per line, in the form:
-    SET|<value>
-    GET|
+Reads commands from stdin, one per line:
+    SET|<value>|<sb-hint>
+    GET||<sb-hint>
     QUIT
 and writes back either a latency in milliseconds or FAILED.
 
 Two connection modes are supported, selected by the third CLI argument:
 
-  mtls   -- connect to onos-config over mTLS. Requires the client identity
-            (client1.crt / client1.key) and the server CA (tls.cacrt) under
-            /etc/onos/certs/. This is the "controller" benchmark mode.
+  mtls   -- connect to onos-config over mTLS.
+  plain  -- connect to a plaintext gNMI server directly.
 
-  plain  -- connect directly to a plaintext gNMI server (e.g. the BeagleBone
-            at <QUANTUM_NODE_IP>:50051). No TLS, no client certs. This is
-            the "direct" benchmark mode that bypasses onos-config.
+The third field (<sb-hint>) selects the southbound transport:
+  NETCONF / gNOI  ->  dispatched to sdn-adapter through the RESTCONF
+                      gateway proxy on ${CONTROLLER_HOST}:8181.
+  gNMI / empty    ->  dispatched to onos-config over the existing
+                      mTLS channel (this is the original Mode 5 path).
 
 Invocation:
-    gnmi_daemon.py <host:port> <device-name> <mtls|plain>
+    gnmi_daemon.py <host:port> <device-name> <mtls|plain> [device-ip]
 
-Commands received on stdin, one per line:
-    SET|<value>|<sb-hint>
-    GET||<sb-hint>
-    QUIT
-
-The third field (<sb-hint>) is accepted for wire compatibility with the
-benchmark script but is currently unused: onos-config routes southbound
-traffic by target name, not by gRPC metadata, and its Get handler rejects
-unknown metadata with an RpcError.
+Environment:
+    CONTROLLER_HOST  host of the RESTCONF gateway LoadBalancer
+                     (exported by the benchmark script from
+                      ~/.quantum-sdn/config.env). Default: 10.0.0.2.
+    GATEWAY_URL      full URL of the gateway. Overrides the above.
+    GATEWAY_TIMEOUT  seconds per gateway call. Default: 15.
 """
 import sys
 import os
@@ -50,24 +48,47 @@ import gnmi_pb2_grpc as gnmi_grpc
 
 DEBUG_LOG = "/tmp/gnmi_debug.log"
 
+GATEWAY_HOST    = os.environ.get("CONTROLLER_HOST", "10.0.0.2")
+GATEWAY_URL     = os.environ.get("GATEWAY_URL", f"http://{GATEWAY_HOST}:8181")
+GATEWAY_TIMEOUT = float(os.environ.get("GATEWAY_TIMEOUT", "15"))
+
+# Southbound ports on the BeagleBone.
+NETCONF_PORT = 8300
+GNOI_PORT    = 50051
+
 
 def log(msg):
     with open(DEBUG_LOG, "a") as f:
         f.write(msg + "\n")
 
 
+def _gateway_post(path, body, timeout=GATEWAY_TIMEOUT):
+    """POST JSON to the gateway. Returns parsed JSON or raises."""
+    url = f"{GATEWAY_URL}{path}"
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(
+        url, data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
 def main():
     if len(sys.argv) < 3:
-        print("FATAL|usage: gnmi_daemon.py <host:port> <device-name> <mtls|plain>")
+        print("FATAL|usage: gnmi_daemon.py <host:port> <device-name> <mtls|plain> [device-ip]")
         sys.stdout.flush()
         sys.exit(1)
 
-    target = sys.argv[1]
-    device = sys.argv[2]
+    target   = sys.argv[1]
+    device   = sys.argv[2]
     tls_mode = sys.argv[3] if len(sys.argv) > 3 else "mtls"
+    device_ip = sys.argv[4] if len(sys.argv) > 4 else device
     host, port = target.split(":") if ":" in target else (target, "5150")
 
-    log(f"daemon starting target={target} device={device} tls_mode={tls_mode}")
+    log(f"daemon starting target={target} device={device} "
+        f"tls_mode={tls_mode} device_ip={device_ip} gateway={GATEWAY_URL}")
 
     if tls_mode == "mtls":
         try:
@@ -112,30 +133,40 @@ def main():
 
     stub = gnmi_grpc.gNMIStub(channel)
 
-    def do_set(value):
-        # The controller-quantum-switching model plugin exposes exactly one
-        # writable leaf: /switching/state (enum: enabled | disabled).
-        enum_value = "disabled" if str(value).strip().lower() == "disabled" else "enabled"
+    # ------------------------------------------------------------------
+    # Southbound dispatch
+    # ------------------------------------------------------------------
 
+    def _dispatch_netconf(state):
+        """state=True -> enable, state=False -> disable."""
+        _gateway_post("/adapter/netconf/switch", {
+            "host":     device_ip,
+            "port":     NETCONF_PORT,
+            "user":     "sdn",
+            "password": "quantum",
+            "state":    state,
+        })
+
+    def _dispatch_gnoi(state):
+        _gateway_post("/adapter/gnoi/crossconnect", {
+            "host":  device_ip,
+            "port":  GNOI_PORT,
+            "state": state,
+        })
+
+    def _dispatch_gnmi_set(enum_value):
         path = "/switching/state"
         elems = [gnmi.PathElem(name=x) for x in path.strip("/").split("/") if x]
         req = gnmi.SetRequest(
             prefix=gnmi.Path(target=device),
-            update=[
-                gnmi.Update(
-                    path=gnmi.Path(elem=elems),
-                    val=gnmi.TypedValue(string_val=enum_value),
-                )
-            ],
+            update=[gnmi.Update(
+                path=gnmi.Path(elem=elems),
+                val=gnmi.TypedValue(string_val=enum_value),
+            )],
         )
-        try:
-            stub.Set(req, timeout=15)
-        except Exception as e:
-            log(f"Set failed on [{path}]: {e}")
-            raise
+        stub.Set(req, timeout=15)
 
-    def do_get():
-        # Read back the same leaf the Set writes to.
+    def _dispatch_gnmi_get():
         elems = [gnmi.PathElem(name=x) for x in
                  "/switching/state".strip("/").split("/") if x]
         req = gnmi.GetRequest(
@@ -146,26 +177,71 @@ def main():
         )
         stub.Get(req, timeout=15)
 
+    # ------------------------------------------------------------------
+    # do_set / do_get take the SB hint and route accordingly
+    # ------------------------------------------------------------------
+
+    def do_set(value, sb_hint=""):
+        is_disabled = str(value).strip().lower() == "disabled"
+
+        if sb_hint == "NETCONF":
+            _dispatch_netconf(state=(not is_disabled))
+            return
+
+        if sb_hint == "GNOI":
+            _dispatch_gnoi(state=(not is_disabled))
+            return
+
+        # gNMI (or empty hint): route through onos-config as before.
+        enum_value = "disabled" if is_disabled else "enabled"
+        _dispatch_gnmi_set(enum_value)
+
+    def do_get(sb_hint=""):
+        if sb_hint == "NETCONF":
+            _gateway_post("/adapter/netconf/status", {
+                "host": device_ip, "port": NETCONF_PORT,
+                "user": "sdn", "password": "quantum",
+            })
+            return
+
+        if sb_hint == "GNOI":
+            _gateway_post("/adapter/gnoi/status", {
+                "host": device_ip, "port": GNOI_PORT,
+            })
+            return
+
+        _dispatch_gnmi_get()
+
+    # ------------------------------------------------------------------
+    # Command loop
+    # ------------------------------------------------------------------
+
     while True:
         line = sys.stdin.readline()
         if not line or "QUIT" in line:
             break
 
         parts = line.strip().split("|")
-        action = parts[0]
+        action  = parts[0]
         raw_val = parts[1] if len(parts) > 1 else ""
-        # Third field accepted for wire compatibility with the shell script,
-        # but not forwarded to onos-config (see module docstring).
-        _sb_hint = parts[2].strip().upper() if len(parts) > 2 else ""
+        sb_hint = parts[2].strip().upper() if len(parts) > 2 else ""
 
         try:
             t0 = time.perf_counter()
             if action == "SET":
-                do_set(raw_val)
+                do_set(raw_val, sb_hint)
             elif action == "GET":
-                do_get()
+                do_get(sb_hint)
             elapsed = int((time.perf_counter() - t0) * 1000)
             print(f"{elapsed}")
+        except urllib.error.URLError as e:
+            log(f"action {action} gateway error: {e}")
+            log(traceback.format_exc())
+            print("FAILED")
+        except grpc.RpcError as e:
+            log(f"action {action} gRPC error: {e.code().name}: {e.details()}")
+            log(traceback.format_exc())
+            print("FAILED")
         except Exception as e:
             log(f"action {action} failed: {e}")
             log(traceback.format_exc())
