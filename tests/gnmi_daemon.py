@@ -20,6 +20,15 @@ Two connection modes are supported, selected by the third CLI argument:
 
 Invocation:
     gnmi_daemon.py <host:port> <device-name> <mtls|plain>
+
+Commands received on stdin (one per line):
+    SET|<value>|<sb-hint>
+    GET||<sb-hint>
+    QUIT
+
+<sb-hint> is one of NETCONF | gNOI | gNMI (or empty). It is forwarded to
+onos-config via gRPC metadata as `southbound-protocol` so the controller
+plugin can pick the correct SB adapter for the transaction.
 """
 import sys
 import os
@@ -102,10 +111,9 @@ def main():
 
     stub = gnmi_grpc.gNMIStub(channel)
 
-    def do_set(value):
+    def do_set(value, sb_hint=""):
         # The controller-quantum-switching model plugin exposes exactly one
         # writable leaf: /switching/state (enum: enabled | disabled).
-        # Any other path is rejected by onos-config with "not yet supported".
         #
         # The shell script sends an arbitrary description string for the
         # "connect" phase and "disabled" for the "disconnect" phase. Map
@@ -124,13 +132,14 @@ def main():
                 )
             ],
         )
+        md = [("southbound-protocol", sb_hint)] if sb_hint else []
         try:
-            stub.Set(req, timeout=15)
+            stub.Set(req, timeout=15, metadata=md)
         except Exception as e:
-            log(f"Set failed on [{path}]: {e}")
+            log(f"Set failed on [{path}] sb_hint={sb_hint}: {e}")
             raise
 
-    def do_get():
+    def do_get(sb_hint=""):
         # Read back the same leaf the Set writes to.
         elems = [gnmi.PathElem(name=x) for x in
                  "/switching/state".strip("/").split("/") if x]
@@ -140,7 +149,8 @@ def main():
             type=gnmi.GetRequest.CONFIG,
             encoding=gnmi.Encoding.JSON_IETF,
         )
-        stub.Get(req, timeout=15)
+        md = [("southbound-protocol", sb_hint)] if sb_hint else []
+        stub.Get(req, timeout=15, metadata=md)
 
     while True:
         line = sys.stdin.readline()
@@ -149,14 +159,15 @@ def main():
 
         parts = line.strip().split("|")
         action = parts[0]
+        raw_val = parts[1] if len(parts) > 1 else ""
+        sb_hint = parts[2].strip().upper() if len(parts) > 2 else ""
 
         try:
             t0 = time.perf_counter()
             if action == "SET":
-                raw_val = parts[1] if len(parts) > 1 else ""
-                do_set(raw_val)
+                do_set(raw_val, sb_hint)
             elif action == "GET":
-                do_get()
+                do_get(sb_hint)
             elapsed = int((time.perf_counter() - t0) * 1000)
             print(f"{elapsed}")
         except Exception as e:
