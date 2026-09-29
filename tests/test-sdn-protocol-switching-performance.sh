@@ -627,16 +627,54 @@ run_lifecycle_benchmark "5" "gNMI -> gNMI"        "gNMI"     "gNMI"
 run_lifecycle_benchmark "6" "RESTCONF -> gNMI"    "RESTCONF" "gNMI"
 
 # Summary Output Table
+#
+# Column layout:
+#   Mode       benchmark mode id
+#   Path       northbound -> southbound protocol pair
+#   NB Conn    NorthBound CONNECT     (curl POST / gNMI SET, measured at this host)
+#   NB Stat    NorthBound STATUS read (curl GET  / gNMI GET, measured at this host)
+#   NB Disc    NorthBound DISCONNECT  (curl DELETE / gNMI SET, measured at this host)
+#   SB Conn    SouthBound confirmation of CONNECT   (device-side probe)
+#   SB Disc    SouthBound confirmation of DISCONNECT (device-side probe)
+#   NB Total   NB Conn + NB Stat + NB Disc  (northbound work only)
+#   E2E        NB Total + SB Conn + SB Disc (full lifecycle, controller -> device)
+#
+# Force a UTF-8 locale so the '±' character is counted as ONE character by
+# printf's %-Ns padding. Under LC_ALL=C the '±' counts as two bytes, which
+# makes columns drift right on rows whose values contain it.
+export LC_ALL=C.UTF-8
+
 echo "=========================================================================================================="
 echo "                   SDN PROTOCOL BENCHMARK SUMMARY (${ITERATIONS} Full Lifecycle Trials)                  "
 echo "                     gNMI target mode: ${ONOS_GNMI_TARGET_MODE} (${ONOS_GNMI_TARGET})"
 echo "=========================================================================================================="
-printf "%-7s | %-20s | %-13s | %-11s | %-13s | %-10s | %-10s | %-13s | %-13s\n" \
-    "Mode" "Path" "Connect (ms)" "Status (ms)" "Disconnect (ms)" "SB-C (ms)" "SB-D (ms)" "Total (ms)" "E2E (ms)"
-echo "----------------------------------------------------------------------------------------------------------------------------------------------------------"
+echo "  NB = Northbound (this host)      SB = Southbound (device-side confirmation)"
+echo
+
+printf "%-7s | %-20s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s\n" \
+    "Mode" "Path" "NB Conn (ms)" "NB Stat (ms)" "NB Disc (ms)" "SB Conn (ms)" "SB Disc (ms)" "NB Total (ms)" "E2E (ms)"
+
+# Print a separator line as long as the header. Using awk to count the
+# header width is more robust than maintaining a hard-coded dash string.
+HEADER_WIDTH=$(
+  printf "%-7s | %-20s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s" \
+    "Mode" "Path" "NB Conn (ms)" "NB Stat (ms)" "NB Disc (ms)" "SB Conn (ms)" "SB Disc (ms)" "NB Total (ms)" "E2E (ms)" \
+    | awk '{ print length($0) }'
+)
+printf -- '-%.0s' $(seq 1 "$HEADER_WIDTH"); echo
 
 while IFS='|' read -r mid mname c_stat s_stat d_stat b_stat e_stat t_stat x_stat; do
-    printf "%-7s | %-20s | %-13s | %-11s | %-13s | %-10s | %-10s | %-13s | %-13s\n" \
+    printf "%-7s | %-20s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s\n" \
         "Mode ${mid}" "${mname}" "${c_stat}" "${s_stat}" "${d_stat}" "${b_stat}" "${e_stat}" "${t_stat}" "${x_stat}"
 done < "$SUMMARY_FILE"
+
 echo "=========================================================================================================="
+echo
+echo "Column legend:"
+echo "  NB Conn    Northbound CONNECT      (curl POST / gNMI SET  — measured at this host)"
+echo "  NB Stat    Northbound STATUS read  (curl GET  / gNMI GET  — measured at this host)"
+echo "  NB Disc    Northbound DISCONNECT   (curl DELETE / gNMI SET — measured at this host)"
+echo "  SB Conn    Southbound confirmation: time until the device reports 'connected'"
+echo "  SB Disc    Southbound confirmation: time until the device reports 'disconnected'"
+echo "  NB Total   Sum of the three northbound operations (no southbound leg)"
+echo "  E2E        NB Total + SB Conn + SB Disc  (full controller-to-device lifecycle)"
