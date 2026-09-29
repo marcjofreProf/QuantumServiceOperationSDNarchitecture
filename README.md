@@ -132,8 +132,8 @@ The benchmark measures real lifecycle latency across multiple execution rounds a
 
 a. Run against Physical Node Hardware:
 ```bash
-TARGET_DEVICE="quantum-node-1" TARGET_NODE_IP="quantum-node-1" ./tests/test-sdn-protocol-switching-performance.sh 10
-TARGET_DEVICE="quantum-node-1" TARGET_NODE_IP="quantum-node-1" ONOS_GNMI_TARGET_MODE=direct ./tests/test-sdn-protocol-switching-performance.sh 10
+SB_CONFIRM_MODE=strict TARGET_DEVICE="quantum-node-1" TARGET_NODE_IP="quantum-node-1" ./tests/test-sdn-protocol-switching-performance.sh 10
+SB_CONFIRM_MODE=strict TARGET_DEVICE="quantum-node-1" TARGET_NODE_IP="quantum-node-1" ONOS_GNMI_TARGET_MODE=direct ./tests/test-sdn-protocol-switching-performance.sh 10
 
 Execution Particularities & Parameters:
 TARGET_DEVICE (Environment Variable): Specifies the ONOS topology target entity name. Set to quantum-node-1 for physical node testing.
