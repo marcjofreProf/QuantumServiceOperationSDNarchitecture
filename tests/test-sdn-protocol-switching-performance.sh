@@ -270,13 +270,26 @@ time_exec() {
 
 calc_stats() {
     $PYTHON_BIN -c '
-import sys, math, re
+import sys, math
 
 raw_input = " ".join(sys.argv[1:])
-vals = [float(n) for n in re.findall(r"\d+\.?\d*", raw_input) if n and n != "FAILED"]
+tokens = [t for t in raw_input.split() if t]
+vals = []
+failures = 0
+for t in tokens:
+    if t in ("FAILED", "TIMEOUT", "ERR", "-", "DEAD") or t.startswith("ERROR"):
+        failures += 1
+        continue
+    try:
+        vals.append(float(t))
+    except ValueError:
+        failures += 1
 
 if not vals:
-    print("0.0|0.0|0.0|0.0")
+    print("FAIL|FAIL|FAIL|FAIL")
+elif failures:
+    avg = sum(vals) / len(vals)
+    print(f"{avg:.1f}|FAIL|{min(vals):.1f}|{max(vals):.1f}")
 else:
     avg = sum(vals) / len(vals)
     std = math.sqrt(sum((x - avg) ** 2 for x in vals) / len(vals))
@@ -341,12 +354,12 @@ if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
 fi
 
 exec_gnmi_op() {
-    local op_type="$1" val_arg="$2"
+    local op_type="$1" val_arg="$2" sb_hint="${3:-}"
     if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
         echo "FAILED"
         return
     fi
-    echo "${op_type}|${val_arg}" >&3
+    echo "${op_type}|${val_arg}|${sb_hint}" >&3
     local res
     read -r res <&4 || res="FAILED"
     if [[ "$res" == FATAL* ]]; then
@@ -469,7 +482,7 @@ exec_connect() {
             -H 'X-Southbound-Target: ${sb_proto}' \
             -d '{\"service-id\":\"${service_id}\",\"target-node\":\"${PAYLOAD_TARGET_DEVICE}\",\"target-node-ip\":\"${PAYLOAD_NODE_IP}\",\"ingress-port\":1,\"egress-port\":2,\"admin-state\":\"ENABLED\",\"name\":\"eth1\",\"description\":\"${service_desc}\"}'"
     else
-        exec_gnmi_op "SET" "$service_desc"
+        exec_gnmi_op "SET" "$service_desc" "$sb_proto"
     fi
 }
 
@@ -482,7 +495,7 @@ exec_disconnect() {
             -H 'X-Southbound-Target: ${sb_proto}' \
             -d '{\"service-id\":\"${service_id}\",\"target-node\":\"${PAYLOAD_TARGET_DEVICE}\"}'"
     else
-        exec_gnmi_op "SET" "disabled"
+        exec_gnmi_op "SET" "disabled" "$sb_proto"
     fi
 }
 
@@ -503,7 +516,7 @@ run_lifecycle_benchmark() {
     if [ "$nb_proto" == "RESTCONF" ]; then
         wp_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
     else
-        wp_stat=$(exec_gnmi_op "GET" "")
+        wp_stat=$(exec_gnmi_op "GET" "" "$sb_proto")
     fi
     check_step "Warmup Status" "$wp_stat"
 
@@ -514,7 +527,7 @@ run_lifecycle_benchmark() {
 
     # 2. Measured Iterations
     local conn_list="" stat_list="" disc_list="" total_list=""
-    local sb_conn_list="" sb_disc_list=""
+    local sb_conn_list="" sb_disc_list="" e2e_list=""
 
     for ((i=1; i<=ITERATIONS; i++)); do
         local service_id="qservice-m${mode_id}-i${i}"
@@ -528,7 +541,7 @@ run_lifecycle_benchmark() {
         if [ "$nb_proto" == "RESTCONF" ]; then
             t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
         else
-            t_stat=$(exec_gnmi_op "GET" "")
+            t_stat=$(exec_gnmi_op "GET" "" "$sb_proto")
         fi
 
         sleep 1 # added sleep to not carry over the measured times in the following process
@@ -538,7 +551,9 @@ run_lifecycle_benchmark() {
         if [[ "$t_sb_conn" =~ ^[0-9]+$ ]]; then
             t_sb_disc=$(wait_sb_state "$SB_EXPECT_DISCONNECT")
         else
-            t_sb_disc="$t_sb_conn"
+            # Connect never observed; still attempt to observe the
+            # disconnect so we don't silently copy the TIMEOUT forward.
+            t_sb_disc=$(wait_sb_state "$SB_EXPECT_DISCONNECT")
         fi
 
         sleep 1 # added sleep to not carry over the measured times in the following process
@@ -556,6 +571,13 @@ run_lifecycle_benchmark() {
         else
             t_total="FAILED"
         fi
+        if [ "$fail_total" -eq 0 ] && \
+           [[ "$t_sb_conn" =~ ^[0-9]+$ ]] && \
+           [[ "$t_sb_disc" =~ ^[0-9]+$ ]]; then
+            t_e2e=$((t_conn + t_stat + t_disc + t_sb_conn + t_sb_disc))
+        else
+            t_e2e="FAILED"
+        fi
 
         conn_list="${conn_list} ${t_conn}"
         stat_list="${stat_list} ${t_stat}"
@@ -563,6 +585,7 @@ run_lifecycle_benchmark() {
         total_list="${total_list} ${t_total}"
         sb_conn_list="${sb_conn_list} ${t_sb_conn}"
         sb_disc_list="${sb_disc_list} ${t_sb_disc}"
+        e2e_list="${e2e_list} ${t_e2e}"
 
         if [ -t 1 ]; then
             # Interactive: overwrite the same line with \r + right-pad to
@@ -588,6 +611,7 @@ run_lifecycle_benchmark() {
     IFS='|' read -r b_avg b_sd b_min b_max <<< "$(calc_stats $sb_conn_list)"
     IFS='|' read -r e_avg e_sd e_min e_max <<< "$(calc_stats $sb_disc_list)"
     IFS='|' read -r t_avg t_sd t_min t_max <<< "$(calc_stats $total_list)"
+    IFS='|' read -r x_avg x_sd x_min x_max <<< "$(calc_stats $e2e_list)"
 
     echo "${mode_id}|${mode_name}|${c_avg}±${c_sd}|${s_avg}±${s_sd}|${d_avg}±${d_sd}|${b_avg}±${b_sd}|${e_avg}±${e_sd}|${t_avg}±${t_sd}" >> "$SUMMARY_FILE"
     echo ""
