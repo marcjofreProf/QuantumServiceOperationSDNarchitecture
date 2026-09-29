@@ -622,14 +622,27 @@ run_lifecycle_benchmark() {
         sb_disc_list="${sb_disc_list} ${t_sb_disc}"
         e2e_list="${e2e_list} ${t_e2e}"
 
+        # Build the SB columns as pre-formatted strings, so "n/a" doesn't
+        # get the "ms" suffix the way a numeric value would.
+        if [ "$t_sb_conn" = "n/a" ]; then
+            sb_conn_field="  n/a"
+        else
+            sb_conn_field="$(printf '%5s' "$t_sb_conn")ms"
+        fi
+        if [ "$t_sb_disc" = "n/a" ]; then
+            sb_disc_field="  n/a"
+        else
+            sb_disc_field="$(printf '%5s' "$t_sb_disc")ms"
+        fi
+
         if [ -t 1 ]; then
             # Interactive: overwrite the same line with \r + right-pad to
             # erase any trailing characters from the previous longer line.
-            printf "\r  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %5sms | SB-D: %5sms | Total: %5sms" \
-                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$t_sb_conn" "$t_sb_disc" "$t_total"
+            printf "\r  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %s | SB-D: %s | Total: %5sms" \
+                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$sb_conn_field" "$sb_disc_field" "$t_total"
         else
-            printf "  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %5sms | SB-D: %5sms | Total: %5sms\n" \
-                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$t_sb_conn" "$t_sb_disc" "$t_total"
+            printf "  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %s | SB-D: %s | Total: %5sms\n" \
+                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$sb_conn_field" "$sb_disc_field" "$t_total"
         fi
         sleep "$INTERVAL"
     done
@@ -661,7 +674,7 @@ run_lifecycle_benchmark() {
         x_str="${x_avg}±${x_sd}"
     fi
 
-    echo "${mode_id}|${mode_name}|${c_avg}±${c_sd}|${s_avg}±${s_sd}|${d_avg}±${d_sd}|${b_str}|${e_str}|${t_avg}±${t_sd}|${x_str}" >> "$SUMMARY_FILE"
+    echo "${mode_id}|${mode_name}|${c_avg} +/- ${c_sd}|${s_avg} +/- ${s_sd}|${d_avg} +/- ${d_sd}|${b_str}|${e_str}|${t_avg} +/- ${t_sd}|${x_str}" >> "$SUMMARY_FILE"
     echo ""
 }
 
@@ -700,10 +713,10 @@ fi
 echo "=========================================================================================================="
 echo "                   SDN PROTOCOL BENCHMARK SUMMARY (${ITERATIONS} Full Lifecycle Trials)                  "
 echo "                     gNMI target mode: ${ONOS_GNMI_TARGET_MODE} (${ONOS_GNMI_TARGET})"
-echo "                     Target: ${TARGET_DEVICE} (${TARGET_NODE_IP}) — ${TARGET_KIND}"
+echo "                     Target: ${TARGET_DEVICE} (${TARGET_NODE_IP}) -- ${TARGET_KIND}"
 echo "=========================================================================================================="
 if [ "$SB_CONFIRM_MODE" = "off" ]; then
-    echo "  NB = Northbound (this host). SB columns are 'n/a' — no southbound confirmation"
+    echo "  NB = Northbound (this host). SB columns are 'n/a' -- no southbound confirmation"
     echo "  was performed for this run (see message above the table for the reason)."
 else
     echo "  NB = Northbound (this host)      SB = Southbound (device-side confirmation)"
@@ -730,9 +743,9 @@ done < "$SUMMARY_FILE"
 echo "=========================================================================================================="
 echo
 echo "Column legend:"
-echo "  NB Conn    Northbound CONNECT      (curl POST / gNMI SET  — measured at this host)"
-echo "  NB Stat    Northbound STATUS read  (curl GET  / gNMI GET  — measured at this host)"
-echo "  NB Disc    Northbound DISCONNECT   (curl DELETE / gNMI SET — measured at this host)"
+echo "  NB Conn    Northbound CONNECT      (curl POST / gNMI SET  -- measured at this host)"
+echo "  NB Stat    Northbound STATUS read  (curl GET  / gNMI GET  -- measured at this host)"
+echo "  NB Disc    Northbound DISCONNECT   (curl DELETE / gNMI SET -- measured at this host)"
 echo "  SB Conn    Southbound confirmation: time until the device reports 'connected'"
 echo "  SB Disc    Southbound confirmation: time until the device reports 'disconnected'"
 echo "  NB Total   Sum of the three northbound operations (no southbound leg)"
