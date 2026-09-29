@@ -40,6 +40,30 @@ if [[ ! "$TARGET_NODE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 # -----------------------------------------------------------------------------
+# Simulator detection
+#
+# The SB probes (sb_probe*.py) point at TARGET_NODE_IP, i.e. the *physical*
+# BeagleBone. When the user selects an in-cluster simulator (devicesim-1,
+# testdevice-1, ...) there is no matching physical device behind those IPs,
+# so the SB columns would either time out or — worse — silently report the
+# state of an unrelated BeagleBone. In both cases the numbers are meaningless.
+#
+# We detect well-known simulator target names and force SB confirmation off
+# for the run. The NB columns and Mode 5/6 will then report NB-only timings,
+# which is the only thing that is actually being measured against the sim.
+# -----------------------------------------------------------------------------
+case "$TARGET_DEVICE" in
+    devicesim-*|testdevice-*|sim-*|*-sim)
+        if [ "$SB_CONFIRM_MODE" != "off" ]; then
+            echo "[*] Target '${TARGET_DEVICE}' is a simulator; disabling SB confirmation."
+            echo "    (SB probes target TARGET_NODE_IP=${TARGET_NODE_IP}, which is a"
+            echo "     physical device, not the simulator. SB columns would be misleading.)"
+            SB_CONFIRM_MODE="off"
+        fi
+        ;;
+esac
+
+# -----------------------------------------------------------------------------
 # gNMI target selection
 #
 #   ONOS_GNMI_TARGET_MODE=controller   (default)
@@ -277,7 +301,11 @@ raw_input = " ".join(sys.argv[1:])
 tokens = [t for t in raw_input.split() if t]
 vals = []
 failures = 0
+na_count = 0
 for t in tokens:
+    if t == "n/a":
+        na_count += 1
+        continue
     if t in ("FAILED", "TIMEOUT", "ERR", "-", "DEAD") or t.startswith("ERROR"):
         failures += 1
         continue
@@ -285,6 +313,12 @@ for t in tokens:
         vals.append(float(t))
     except ValueError:
         failures += 1
+
+# All samples are "n/a": the column does not apply to this run.
+if vals == [] and failures == 0 and na_count > 0:
+    print("n/a")
+    import sys as _sys
+    _sys.exit(0)
 
 if not vals:
     print("FAIL|FAIL|FAIL|FAIL")
@@ -445,7 +479,7 @@ stop_sb_probe() {
 wait_sb_state() {
     local expected="$1"
     local timeout_ms="${2:-$SB_CONFIRM_TIMEOUT_MS}"
-    if [ -z "$SB_DAEMON_PID" ] || [ -z "$expected" ]; then echo "-"; return 0; fi
+    if [ -z "$SB_DAEMON_PID" ] || [ -z "$expected" ]; then echo "n/a"; return 0; fi
     if ! kill -0 "$SB_DAEMON_PID" 2>/dev/null; then echo "DEAD"; return 0; fi
     local start_t end_t resp
     start_t=$(get_time_ms)
@@ -614,7 +648,20 @@ run_lifecycle_benchmark() {
     IFS='|' read -r t_avg t_sd t_min t_max <<< "$(calc_stats $total_list)"
     IFS='|' read -r x_avg x_sd x_min x_max <<< "$(calc_stats $e2e_list)"
 
-    echo "${mode_id}|${mode_name}|${c_avg}±${c_sd}|${s_avg}±${s_sd}|${d_avg}±${d_sd}|${b_avg}±${b_sd}|${e_avg}±${e_sd}|${t_avg}±${t_sd}|${x_avg}±${x_sd}" >> "$SUMMARY_FILE"
+    # When SB confirmation is disabled (simulator target, or SB_CONFIRM_MODE=off),
+    # the SB columns carry "n/a" and E2E collapses to NB Total. Emit a single
+    # literal "n/a" for each SB column, and reuse the NB Total value for E2E.
+    if [ "$SB_CONFIRM_MODE" = "off" ] || [ "$b_avg" = "n/a" ]; then
+        b_str="n/a"
+        e_str="n/a"
+        x_str="${t_avg}±${t_sd}"
+    else
+        b_str="${b_avg}±${b_sd}"
+        e_str="${e_avg}±${e_sd}"
+        x_str="${x_avg}±${x_sd}"
+    fi
+
+    echo "${mode_id}|${mode_name}|${c_avg}±${c_sd}|${s_avg}±${s_sd}|${d_avg}±${d_sd}|${b_str}|${e_str}|${t_avg}±${t_sd}|${x_str}" >> "$SUMMARY_FILE"
     echo ""
 }
 
@@ -644,11 +691,23 @@ run_lifecycle_benchmark "6" "RESTCONF -> gNMI"    "RESTCONF" "gNMI"
 # makes columns drift right on rows whose values contain it.
 export LC_ALL=C.UTF-8
 
+if [ "$SB_CONFIRM_MODE" = "off" ]; then
+    TARGET_KIND="simulator / SB confirmation disabled"
+else
+    TARGET_KIND="physical device"
+fi
+
 echo "=========================================================================================================="
 echo "                   SDN PROTOCOL BENCHMARK SUMMARY (${ITERATIONS} Full Lifecycle Trials)                  "
 echo "                     gNMI target mode: ${ONOS_GNMI_TARGET_MODE} (${ONOS_GNMI_TARGET})"
+echo "                     Target: ${TARGET_DEVICE} (${TARGET_NODE_IP}) — ${TARGET_KIND}"
 echo "=========================================================================================================="
-echo "  NB = Northbound (this host)      SB = Southbound (device-side confirmation)"
+if [ "$SB_CONFIRM_MODE" = "off" ]; then
+    echo "  NB = Northbound (this host). SB columns are 'n/a' — no southbound confirmation"
+    echo "  was performed for this run (see message above the table for the reason)."
+else
+    echo "  NB = Northbound (this host)      SB = Southbound (device-side confirmation)"
+fi
 echo
 
 printf "%-7s | %-20s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s | %-13s\n" \
