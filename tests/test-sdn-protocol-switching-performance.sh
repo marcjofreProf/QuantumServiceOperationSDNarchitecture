@@ -613,7 +613,7 @@ run_lifecycle_benchmark() {
     IFS='|' read -r t_avg t_sd t_min t_max <<< "$(calc_stats $total_list)"
     IFS='|' read -r x_avg x_sd x_min x_max <<< "$(calc_stats $e2e_list)"
 
-    echo "${mode_id}|${mode_name}|${c_avg}±${c_sd}|${s_avg}±${s_sd}|${d_avg}±${d_sd}|${b_avg}±${b_sd}|${e_avg}±${e_sd}|${t_avg}±${t_sd}" >> "$SUMMARY_FILE"
+    echo "${mode_id}|${mode_name}|${c_avg}±${c_sd}|${s_avg}±${s_sd}|${d_avg}±${d_sd}|${b_avg}±${b_sd}|${e_avg}±${e_sd}|${t_avg}±${t_sd}|${x_avg}±${x_sd}" >> "$SUMMARY_FILE"
     echo ""
 }
 
@@ -630,12 +630,12 @@ echo "==========================================================================
 echo "                   SDN PROTOCOL BENCHMARK SUMMARY (${ITERATIONS} Full Lifecycle Trials)                  "
 echo "                     gNMI target mode: ${ONOS_GNMI_TARGET_MODE} (${ONOS_GNMI_TARGET})"
 echo "=========================================================================================================="
-printf "%-7s | %-20s | %-13s | %-11s | %-13s | %-10s | %-10s | %-13s\n" \
-    "Mode" "Path" "Connect (ms)" "Status (ms)" "Disconnect (ms)" "SB-C (ms)" "SB-D (ms)" "Total (ms)"
-echo "--------------------------------------------------------------------------------------------------------------------------------------"
+printf "%-7s | %-20s | %-13s | %-11s | %-13s | %-10s | %-10s | %-13s | %-13s\n" \
+    "Mode" "Path" "Connect (ms)" "Status (ms)" "Disconnect (ms)" "SB-C (ms)" "SB-D (ms)" "Total (ms)" "E2E (ms)"
+echo "----------------------------------------------------------------------------------------------------------------------------------------------------------"
 
-while IFS='|' read -r mid mname c_stat s_stat d_stat b_stat e_stat t_stat; do
-    printf "%-7s | %-20s | %-13s | %-11s | %-13s | %-10s | %-10s | %-13s\n" \
-        "Mode ${mid}" "${mname}" "${c_stat}" "${s_stat}" "${d_stat}" "${b_stat}" "${e_stat}" "${t_stat}"
+while IFS='|' read -r mid mname c_stat s_stat d_stat b_stat e_stat t_stat x_stat; do
+    printf "%-7s | %-20s | %-13s | %-11s | %-13s | %-10s | %-10s | %-13s | %-13s\n" \
+        "Mode ${mid}" "${mname}" "${c_stat}" "${s_stat}" "${d_stat}" "${b_stat}" "${e_stat}" "${t_stat}" "${x_stat}"
 done < "$SUMMARY_FILE"
 echo "=========================================================================================================="
