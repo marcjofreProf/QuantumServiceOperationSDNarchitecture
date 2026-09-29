@@ -33,11 +33,39 @@ TARGET_NODE_IP="${TARGET_NODE_IP:-${QUANTUM_NODE_IP:-172.21.128.254}}"
 # configured node IP. The gateway would otherwise forward a hostname
 # to the southbound adapter, which cannot resolve it inside the
 # cluster.
-if [[ ! "$TARGET_NODE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    RESOLVED="${QUANTUM_NODE_IP:-172.21.128.254}"
-    echo "[*] TARGET_NODE_IP='${TARGET_NODE_IP}' is not an IP; using '${RESOLVED}'"
-    TARGET_NODE_IP="${RESOLVED}"
-fi
+# -----------------------------------------------------------------------------
+# Target address resolution
+#
+# For physical targets (quantum-node-1, etc.), TARGET_NODE_IP is expected to be
+# an IP address. If the user passed the topo entity name instead (the historical
+# convention "TARGET_DEVICE=X TARGET_NODE_IP=X"), we fall back to the configured
+# BeagleBone IP.
+#
+# For simulator targets (devicesim-1, testdevice-1, ...), TARGET_NODE_IP is
+# expected to be the in-cluster service address (e.g. device-simulator:11161).
+# We must NOT coerce it to the BeagleBone IP, because then every mode would
+# silently measure the wrong device.
+# -----------------------------------------------------------------------------
+case "$TARGET_DEVICE" in
+    devicesim-*|testdevice-*|sim-*|*-sim)
+        # Simulator: keep whatever TARGET_NODE_IP the user provided. If it is
+        # still the topo entity name, replace it with the known service address.
+        if [[ ! "$TARGET_NODE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?$ ]] \
+           && [[ "$TARGET_NODE_IP" != *:* ]]; then
+            SIM_RESOLVED="device-simulator:11161"
+            echo "[*] TARGET_NODE_IP='${TARGET_NODE_IP}' is not a service address; using '${SIM_RESOLVED}'"
+            TARGET_NODE_IP="${SIM_RESOLVED}"
+        fi
+        ;;
+    *)
+        # Physical device: original coercion logic.
+        if [[ ! "$TARGET_NODE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            RESOLVED="${QUANTUM_NODE_IP:-172.21.128.254}"
+            echo "[*] TARGET_NODE_IP='${TARGET_NODE_IP}' is not an IP; using '${RESOLVED}'"
+            TARGET_NODE_IP="${RESOLVED}"
+        fi
+        ;;
+esac
 
 # -----------------------------------------------------------------------------
 # Simulator detection
