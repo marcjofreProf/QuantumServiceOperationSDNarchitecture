@@ -62,6 +62,7 @@ ONOS_GNMI_TARGET_MODE="${ONOS_GNMI_TARGET_MODE:-controller}"
 # The fallback below only fires if the file does not exist and the shell
 # did not export a value.
 CONTROLLER_HOST="${CONTROLLER_HOST:-172.21.2.23}"
+export CONTROLLER_HOST
 
 # The node's own gNMI endpoint, used only in direct mode. It is derived
 # from the node IP loaded above so a single config drives both the
