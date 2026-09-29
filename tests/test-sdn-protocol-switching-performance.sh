@@ -307,7 +307,7 @@ mkfifo "$FIFO_IN" "$FIFO_OUT"
 #   $1 = target endpoint (host:port)
 #   $2 = target device name (for the gNMI Path.target field)
 #   $3 = TLS mode: "mtls" or "plain"
-$PYTHON_BIN "$PY_DAEMON_SCRIPT" "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$GNMI_TLS_MODE" < "$FIFO_IN" > "$FIFO_OUT" &
+$PYTHON_BIN "$PY_DAEMON_SCRIPT" "$ONOS_GNMI_TARGET" "$TARGET_DEVICE" "$GNMI_TLS_MODE" "$TARGET_NODE_IP" < "$FIFO_IN" > "$FIFO_OUT" &
 DAEMON_PID=$!
 
 # Open file descriptors on the created FIFOs
