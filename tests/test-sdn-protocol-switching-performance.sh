@@ -575,7 +575,8 @@ run_lifecycle_benchmark() {
     echo -n "[*] Pre-Warmup Lifecycle Run... "
     wp_conn=$(exec_connect "$mode_id" "$nb_proto" "$sb_proto" "warmup")
     check_step "Warmup Connect" "$wp_conn"
-
+    sleep 1 # added sleep to not carry over the measured times in the following process
+    
     if [ "$nb_proto" == "RESTCONF" ]; then
         wp_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
     else
@@ -586,7 +587,7 @@ run_lifecycle_benchmark() {
     wp_disc=$(exec_disconnect "$mode_id" "$nb_proto" "$sb_proto" "warmup")
     check_step "Warmup Disconnect" "$wp_disc"
     echo "Done (Conn: ${wp_conn}ms | Stat: ${wp_stat}ms | Disc: ${wp_disc}ms)"
-    sleep 1
+    sleep 1 # added sleep to not carry over the measured times in the following process
 
     # 2. Measured Iterations
     local conn_list="" stat_list="" disc_list="" total_list=""
@@ -597,6 +598,8 @@ run_lifecycle_benchmark() {
 
         t_conn=$(exec_connect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
 
+        sleep 1 # added sleep to not carry over the measured times in the following process
+        
         t_sb_conn=$(wait_sb_state "$SB_EXPECT_CONNECT")
 
         sleep 1 # added sleep to not carry over the measured times in the following process
@@ -611,15 +614,17 @@ run_lifecycle_benchmark() {
 
         t_disc=$(exec_disconnect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
 
+        sleep 1 # added sleep to not carry over the measured times in the following process
+
         if [[ "$t_sb_conn" =~ ^[0-9]+$ ]]; then
             t_sb_disc=$(wait_sb_state "$SB_EXPECT_DISCONNECT")
         else
             # Connect never observed; still attempt to observe the
             # disconnect so we don't silently copy the TIMEOUT forward.
             t_sb_disc=$(wait_sb_state "$SB_EXPECT_DISCONNECT")
-        fi
+        fi        
 
-        sleep 1 # added sleep to not carry over the measured times in the following process
+        sleep 3 # added sleep to not carry over the measured times in the following process
         
         local fail_total=0
         [ "$t_conn" = "FAILED" ] && fail_total=1
