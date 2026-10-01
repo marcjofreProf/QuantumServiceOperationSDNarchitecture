@@ -587,7 +587,7 @@ run_lifecycle_benchmark() {
     wp_disc=$(exec_disconnect "$mode_id" "$nb_proto" "$sb_proto" "warmup")
     check_step "Warmup Disconnect" "$wp_disc"
     echo "Done (Conn: ${wp_conn}ms | Stat: ${wp_stat}ms | Disc: ${wp_disc}ms)"
-    sleep 1 # added sleep to not carry over the measured times in the following process
+    sleep 2 # added sleep to not carry over the measured times in the following process
 
     # 2. Measured Iterations
     local conn_list="" stat_list="" disc_list="" total_list=""
@@ -597,8 +597,6 @@ run_lifecycle_benchmark() {
         local service_id="qservice-m${mode_id}-i${i}"
 
         t_conn=$(exec_connect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
-
-        sleep 1 # added sleep to not carry over the measured times in the following process
         
         t_sb_conn=$(wait_sb_state "$SB_EXPECT_CONNECT")
 
@@ -613,8 +611,6 @@ run_lifecycle_benchmark() {
         sleep 1 # added sleep to not carry over the measured times in the following process
 
         t_disc=$(exec_disconnect "$mode_id" "$nb_proto" "$sb_proto" "$service_id")
-
-        sleep 1 # added sleep to not carry over the measured times in the following process
 
         if [[ "$t_sb_conn" =~ ^[0-9]+$ ]]; then
             t_sb_disc=$(wait_sb_state "$SB_EXPECT_DISCONNECT")
