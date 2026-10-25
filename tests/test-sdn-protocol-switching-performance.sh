@@ -839,10 +839,6 @@ if [ "$SB_CONFIRM_MODE" != "off" ]; then
     rm -f "$_d_tmp"
 
     echo "----------------------------------------------------------------------------------------------------------"
-    echo "  Read this table first. The 9-column table above answers"
-    echo "  'which mode ACKs fastest'. This table answers 'which mode"
-    echo "  completes the observed lifecycle fastest'. Rank order can"
-    echo "  differ (Modes 2 and 5 are the canonical example)."
 fi
 
 echo "=========================================================================================================="
@@ -855,34 +851,3 @@ echo "  SB Conn    Southbound confirmation: time until the device reports 'conne
 echo "  SB Disc    Southbound confirmation: time until the device reports 'disconnected'"
 echo "  NB Total   Sum of the three northbound operations (no southbound leg)"
 echo "  E2E        NB Total + SB Conn + SB Disc  (full controller-to-device lifecycle)"
-echo
-echo "Interpretation notes:"
-echo "  * SB Total = SB Conn + SB Disc.  In Modes 5 and 6 it dominates"
-echo "    (~68-71% of E2E): the NB ACK is fast, but the device does not"
-echo "    report the new state for another ~270 ms.  In Modes 1-4 it is"
-echo "    small (8-28%), because the NB ACK already includes most of the"
-echo "    NETCONF/gNOI propagation.  Do not compare SB across these two"
-echo "    groups -- they are structurally different paths."
-echo
-echo "  * NB Total and E2E rank modes differently.  Do not conclude"
-echo "    'Mode 5 is fastest' from NB Total alone: Modes 2 and 4 have a"
-echo "    higher NB Total but a lower E2E.  See the DERIVED COMPARISON"
-echo "    table above."
-echo
-echo "  * NB Stat is not the same operation across modes.  RESTCONF GET"
-echo "    returns the controller's cached state (no device I/O).  gNMI"
-echo "    GET with an SB hint re-queries the device via /adapter/*/status."
-echo "    Compare NB Stat only within the same NB protocol."
-echo
-echo "  * Modes 3 and 4 route the northbound request through the RESTCONF"
-echo "    gateway's /adapter/netconf/* and /adapter/gnoi/* HTTP endpoints."
-echo "    Only Mode 5 exercises native gRPC gNMI on the northbound,"
-echo "    despite the 'gNMI -> ...' label.  See gnmi_daemon.py:do_set()."
-echo
-echo "  * With ITERATIONS=1, the '+/- 0.0' suffix means 'one sample', not"
-echo "    'stable to one decimal'.  Use ITERATIONS>=10 for any comparison"
-echo "    between runs."
-echo
-echo "  * SB Conn vs SB Disc asymmetry (Mode 1: 103 vs 24 ms) is a real"
-echo "    characteristic of state propagation, not measurement noise --"
-echo "    but with n=1 it is not yet a finding either."
