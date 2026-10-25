@@ -304,18 +304,36 @@ echo
 PAYLOAD_NODE_IP="${TARGET_NODE_IP}"
 PAYLOAD_TARGET_DEVICE="${TARGET_DEVICE}"
 
-get_time_ms() {
-    $PYTHON_BIN -c 'import time; print(int(time.time() * 1000))'
+# Native, fork-free microsecond timestamp.
+# Bash ≥ 5.0 exposes $EPOCHREALTIME as "sec.usec" (always 6 fractional
+# digits). Removing the dot yields an integer in microseconds.
+# Fallback to GNU date on older bash; not needed on this box (bash 5.3.9).
+if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    now_us() { printf '%s' "${EPOCHREALTIME/./}"; }
+else
+    now_us() { date +%s%6N; }
+fi
+
+# Kept as a thin alias for compatibility. Fork-free now.
+get_time_ms() { printf '%s' "$(( $(now_us) / 1000 ))"; }
+
+# Fork-free millisecond sleep. GNU sleep supports fractional seconds;
+# falls back to Python only if that fails (e.g. BusyBox sleep).
+sleep_frac_ms() {
+    sleep "$(printf '%d.%03d' "$(($1 / 1000))" "$(($1 % 1000))")" 2>/dev/null \
+        || "$PYTHON_BIN" -c "import time; time.sleep($1 / 1000.0)"
 }
 
+# Same signature (a single command string), same FAILED semantics, same
+# error-log path. Only the clock changed: no per-call python3 spawn.
 time_exec() {
     local cmd="$1"
-    local start_t end_t elapsed
-    start_t=$(get_time_ms)
+    local start_us end_us elapsed_ms
+    start_us=$(now_us)
     if eval "$cmd" >/tmp/nb_cmd_last_error.log 2>&1; then
-        end_t=$(get_time_ms)
-        elapsed=$((end_t - start_t))
-        echo "$elapsed"
+        end_us=$(now_us)
+        elapsed_ms=$(( (end_us - start_us) / 1000 ))
+        echo "$elapsed_ms"
     else
         echo "FAILED"
     fi
@@ -509,20 +527,24 @@ wait_sb_state() {
     local timeout_ms="${2:-$SB_CONFIRM_TIMEOUT_MS}"
     if [ -z "$SB_DAEMON_PID" ] || [ -z "$expected" ]; then echo "n/a"; return 0; fi
     if ! kill -0 "$SB_DAEMON_PID" 2>/dev/null; then echo "DEAD"; return 0; fi
-    local start_t end_t resp
-    start_t=$(get_time_ms)
+    local start_us end_us elapsed_ms resp
+    start_us=$(now_us)
     while :; do
         echo "CHECK|${expected}" >&5
         if ! read -r resp <&6; then echo "ERROR|eof"; return 0; fi
         case "$resp" in
-            PRESENT) end_t=$(get_time_ms); echo $((end_t - start_t)); return 0 ;;
+            PRESENT)
+                end_us=$(now_us)
+                elapsed_ms=$(( (end_us - start_us) / 1000 ))
+                echo "$elapsed_ms"; return 0 ;;
             ABSENT)  : ;;
             ERROR*)  echo "ERR"; return 0 ;;
             *)       echo "ERROR|bad-response:${resp}"; return 0 ;;
         esac
-        end_t=$(get_time_ms)
-        if [ $((end_t - start_t)) -ge "$timeout_ms" ]; then echo "TIMEOUT"; return 0; fi
-        $PYTHON_BIN -c "import time; time.sleep(${SB_CONFIRM_POLL_MS} / 1000.0)"
+        end_us=$(now_us)
+        elapsed_ms=$(( (end_us - start_us) / 1000 ))
+        if [ "$elapsed_ms" -ge "$timeout_ms" ]; then echo "TIMEOUT"; return 0; fi
+        sleep_frac_ms "$SB_CONFIRM_POLL_MS"
     done
 }
 
