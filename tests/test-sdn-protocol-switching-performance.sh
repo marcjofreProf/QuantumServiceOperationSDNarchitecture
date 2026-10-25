@@ -689,10 +689,10 @@ run_lifecycle_benchmark() {
         if [ -t 1 ]; then
             # Interactive: overwrite the same line with \r + right-pad to
             # erase any trailing characters from the previous longer line.
-            printf "\r  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %s | SB-D: %s | Total: %5sms" \
+            printf "\r  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %s | SB-D: %s | NB Tot: %5sms" \
                 "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$sb_conn_field" "$sb_disc_field" "$t_total"
         else
-            printf "  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %s | SB-D: %s | Total: %5sms\n" \
+            printf "  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %s | SB-D: %s | NB Tot: %5sms\n" \
                 "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$sb_conn_field" "$sb_disc_field" "$t_total"
         fi
         sleep "$INTERVAL"
@@ -762,7 +762,8 @@ else
 fi
 
 echo "=========================================================================================================="
-echo "                   SDN PROTOCOL BENCHMARK SUMMARY (${ITERATIONS} Full Lifecycle Trials)                  "
+_trial_word="Trials"; [ "$ITERATIONS" -eq 1 ] && _trial_word="Trial"
+echo "                   SDN PROTOCOL BENCHMARK SUMMARY (${ITERATIONS} Full Lifecycle ${_trial_word})                  "
 echo "                     gNMI target mode: ${ONOS_GNMI_TARGET_MODE} (${ONOS_GNMI_TARGET})"
 echo "                     Target: ${TARGET_DEVICE} (${TARGET_NODE_IP}) -- ${TARGET_KIND}"
 echo "=========================================================================================================="
@@ -791,6 +792,59 @@ while IFS='|' read -r mid mname c_stat s_stat d_stat b_stat e_stat t_stat x_stat
         "Mode ${mid}" "${mname}" "${c_stat}" "${s_stat}" "${d_stat}" "${b_stat}" "${e_stat}" "${t_stat}" "${x_stat}"
 done < "$SUMMARY_FILE"
 
+# ---------------------------------------------------------------------------
+# Derived comparison. Ranks modes by *observed lifecycle* (E2E) rather
+# than by NB ACK. Those are different questions and can rank modes
+# differently: on the reference run, Mode 5 had the lowest NB Total
+# (108 ms) but Modes 2 and 4 had the lowest E2E (216/224 ms). Without
+# this view, a reader comparing only NB Total draws the wrong
+# conclusion. Only rendered when SB confirmation actually ran.
+# ---------------------------------------------------------------------------
+if [ "$SB_CONFIRM_MODE" != "off" ]; then
+    echo
+    echo "----------------------------------------------------------------------------------------------------------"
+    echo "DERIVED COMPARISON  (sorted by E2E -- 'fastest' means fastest observed lifecycle, not fastest ACK)"
+    echo "----------------------------------------------------------------------------------------------------------"
+
+    D_HEADER=$(printf "%-7s | %-20s | %-10s | %-10s | %-10s | %-6s | %-14s" \
+        "Mode" "Path" "NB Total" "SB Total" "E2E" "SB %" "Dominant leg")
+    echo "$D_HEADER"
+    printf -- '-%.0s' $(seq 1 "${#D_HEADER}"); echo
+
+    _d_tmp=$(mktemp)
+    while IFS='|' read -r mid mname c_stat s_stat d_stat b_stat e_stat t_stat x_stat; do
+        nb_mean=$(echo "$t_stat" | awk '{print $1}')
+        sc_mean=$(echo "$b_stat" | awk '{print $1}')
+        sd_mean=$(echo "$e_stat" | awk '{print $1}')
+        e2e_mean=$(echo "$x_stat" | awk '{print $1}')
+        if [[ "$nb_mean"  =~ ^[0-9.]+$ ]] && \
+           [[ "$sc_mean"  =~ ^[0-9.]+$ ]] && \
+           [[ "$sd_mean"  =~ ^[0-9.]+$ ]] && \
+           [[ "$e2e_mean" =~ ^[0-9.]+$ ]]; then
+            sb_total=$(awk -v a="$sc_mean" -v b="$sd_mean" 'BEGIN{printf "%.0f", a+b}')
+            sb_pct=$(awk   -v s="$sb_total" -v e="$e2e_mean" \
+                           'BEGIN{if(e>0) printf "%.0f", (s/e)*100; else print "?"}')
+            dominant=$(awk -v n="$nb_mean" -v s="$sb_total" \
+                           'BEGIN{print (s>n ? "SB confirmation" : "NB ack")}')
+            printf '%s\t%s\t%s\t%s\t%s\t%s%%\t%s\n' \
+                "$mid" "$mname" "$nb_mean" "$sb_total" "$e2e_mean" "$sb_pct" "$dominant" >> "$_d_tmp"
+        fi
+    done < "$SUMMARY_FILE"
+
+    sort -t$'\t' -k5,5n "$_d_tmp" | \
+    while IFS=$'\t' read -r mid mname nb sb e2e pct dom; do
+        printf "%-7s | %-20s | %-10s | %-10s | %-10s | %-6s | %-14s\n" \
+            "Mode ${mid}" "${mname}" "${nb}" "${sb}" "${e2e}" "${pct}" "${dom}"
+    done
+    rm -f "$_d_tmp"
+
+    echo "----------------------------------------------------------------------------------------------------------"
+    echo "  Read this table first. The 9-column table above answers"
+    echo "  'which mode ACKs fastest'. This table answers 'which mode"
+    echo "  completes the observed lifecycle fastest'. Rank order can"
+    echo "  differ (Modes 2 and 5 are the canonical example)."
+fi
+
 echo "=========================================================================================================="
 echo
 echo "Column legend:"
@@ -801,3 +855,34 @@ echo "  SB Conn    Southbound confirmation: time until the device reports 'conne
 echo "  SB Disc    Southbound confirmation: time until the device reports 'disconnected'"
 echo "  NB Total   Sum of the three northbound operations (no southbound leg)"
 echo "  E2E        NB Total + SB Conn + SB Disc  (full controller-to-device lifecycle)"
+echo
+echo "Interpretation notes:"
+echo "  * SB Total = SB Conn + SB Disc.  In Modes 5 and 6 it dominates"
+echo "    (~68-71% of E2E): the NB ACK is fast, but the device does not"
+echo "    report the new state for another ~270 ms.  In Modes 1-4 it is"
+echo "    small (8-28%), because the NB ACK already includes most of the"
+echo "    NETCONF/gNOI propagation.  Do not compare SB across these two"
+echo "    groups -- they are structurally different paths."
+echo
+echo "  * NB Total and E2E rank modes differently.  Do not conclude"
+echo "    'Mode 5 is fastest' from NB Total alone: Modes 2 and 4 have a"
+echo "    higher NB Total but a lower E2E.  See the DERIVED COMPARISON"
+echo "    table above."
+echo
+echo "  * NB Stat is not the same operation across modes.  RESTCONF GET"
+echo "    returns the controller's cached state (no device I/O).  gNMI"
+echo "    GET with an SB hint re-queries the device via /adapter/*/status."
+echo "    Compare NB Stat only within the same NB protocol."
+echo
+echo "  * Modes 3 and 4 route the northbound request through the RESTCONF"
+echo "    gateway's /adapter/netconf/* and /adapter/gnoi/* HTTP endpoints."
+echo "    Only Mode 5 exercises native gRPC gNMI on the northbound,"
+echo "    despite the 'gNMI -> ...' label.  See gnmi_daemon.py:do_set()."
+echo
+echo "  * With ITERATIONS=1, the '+/- 0.0' suffix means 'one sample', not"
+echo "    'stable to one decimal'.  Use ITERATIONS>=10 for any comparison"
+echo "    between runs."
+echo
+echo "  * SB Conn vs SB Disc asymmetry (Mode 1: 103 vs 24 ms) is a real"
+echo "    characteristic of state propagation, not measurement noise --"
+echo "    but with n=1 it is not yet a finding either."
