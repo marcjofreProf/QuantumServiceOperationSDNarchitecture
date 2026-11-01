@@ -600,7 +600,11 @@ run_lifecycle_benchmark() {
     sleep 1 # added sleep to not carry over the measured times in the following process
     
     if [ "$nb_proto" == "RESTCONF" ]; then
-        wp_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
+        wp_stat=$(time_exec "curl -s -f -D /tmp/nb_hdrs_wp \
+            -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}&refresh=true'")
+        if grep -qi '^X-Cache-Status: stale' /tmp/nb_hdrs_wp 2>/dev/null; then
+            wp_stat="n/a"
+        fi
     else
         wp_stat=$(exec_gnmi_op "GET" "" "$sb_proto")
     fi
@@ -625,7 +629,11 @@ run_lifecycle_benchmark() {
         sleep 1 # added sleep to not carry over the measured times in the following process
         
         if [ "$nb_proto" == "RESTCONF" ]; then
-            t_stat=$(time_exec "curl -s -f -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}'")
+            t_stat=$(time_exec "curl -s -f -D /tmp/nb_hdrs \
+                -X GET '${RESTCONF_GW_URL}?sb=${sb_proto}&refresh=true'")
+            if grep -qi '^X-Cache-Status: stale' /tmp/nb_hdrs 2>/dev/null; then
+                t_stat="n/a"
+            fi
         else
             t_stat=$(exec_gnmi_op "GET" "" "$sb_proto")
         fi
@@ -652,17 +660,25 @@ run_lifecycle_benchmark() {
             case "$t_sb_conn" in TIMEOUT|ERROR*|eof) fail_total=1 ;; esac
             case "$t_sb_disc" in TIMEOUT|ERROR*|eof) fail_total=1 ;; esac
         fi
-        if [ "$fail_total" -eq 0 ]; then
-            t_total=$((t_conn + t_stat + t_disc))
-        else
+
+        # When the gateway couldn't do a live read (adapter endpoint
+        # missing → X-Cache-Status: stale), t_stat is "n/a" and can't
+        # be summed. Report NB Total and E2E as "n/a" rather than
+        # computing a bogus number.
+        if [ "$fail_total" -ne 0 ]; then
             t_total="FAILED"
-        fi
-        if [ "$fail_total" -eq 0 ] && \
-           [[ "$t_sb_conn" =~ ^[0-9]+$ ]] && \
-           [[ "$t_sb_disc" =~ ^[0-9]+$ ]]; then
-            t_e2e=$((t_conn + t_stat + t_disc + t_sb_conn + t_sb_disc))
-        else
             t_e2e="FAILED"
+        elif [ "$t_stat" = "n/a" ]; then
+            t_total="n/a"
+            t_e2e="n/a"
+        else
+            t_total=$((t_conn + t_stat + t_disc))
+            if [[ "$t_sb_conn" =~ ^[0-9]+$ ]] && \
+               [[ "$t_sb_disc" =~ ^[0-9]+$ ]]; then
+                t_e2e=$((t_conn + t_stat + t_disc + t_sb_conn + t_sb_disc))
+            else
+                t_e2e="FAILED"
+            fi
         fi
 
         conn_list="${conn_list} ${t_conn}"
@@ -673,8 +689,29 @@ run_lifecycle_benchmark() {
         sb_disc_list="${sb_disc_list} ${t_sb_disc}"
         e2e_list="${e2e_list} ${t_e2e}"
 
-        # Build the SB columns as pre-formatted strings, so "n/a" doesn't
-        # get the "ms" suffix the way a numeric value would.
+        # Build every numeric field as a pre-formatted string so "n/a"
+        # (adapter endpoint missing, or simulator SB disabled) doesn't
+        # get a bogus "ms" suffix.
+        if [ "$t_conn" = "n/a" ] || [ "$t_conn" = "FAILED" ]; then
+            conn_field="  n/a"
+        else
+            conn_field="$(printf '%5s' "$t_conn")ms"
+        fi
+        if [ "$t_stat" = "n/a" ] || [ "$t_stat" = "FAILED" ]; then
+            stat_field="  n/a"
+        else
+            stat_field="$(printf '%5s' "$t_stat")ms"
+        fi
+        if [ "$t_disc" = "n/a" ] || [ "$t_disc" = "FAILED" ]; then
+            disc_field="  n/a"
+        else
+            disc_field="$(printf '%5s' "$t_disc")ms"
+        fi
+        if [ "$t_total" = "n/a" ] || [ "$t_total" = "FAILED" ]; then
+            total_field="  n/a"
+        else
+            total_field="$(printf '%5s' "$t_total")ms"
+        fi
         if [ "$t_sb_conn" = "n/a" ]; then
             sb_conn_field="  n/a"
         else
@@ -689,11 +726,11 @@ run_lifecycle_benchmark() {
         if [ -t 1 ]; then
             # Interactive: overwrite the same line with \r + right-pad to
             # erase any trailing characters from the previous longer line.
-            printf "\r  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %s | SB-D: %s | NB Tot: %5sms" \
-                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$sb_conn_field" "$sb_disc_field" "$t_total"
+            printf "\r  [Trial %2d/%2d] Conn: %s | Stat: %s | Disc: %s | SB-C: %s | SB-D: %s | NB Tot: %s" \
+                "$i" "$ITERATIONS" "$conn_field" "$stat_field" "$disc_field" "$sb_conn_field" "$sb_disc_field" "$total_field"
         else
-            printf "  [Trial %2d/%2d] Conn: %5sms | Stat: %5sms | Disc: %5sms | SB-C: %s | SB-D: %s | NB Tot: %5sms\n" \
-                "$i" "$ITERATIONS" "$t_conn" "$t_stat" "$t_disc" "$sb_conn_field" "$sb_disc_field" "$t_total"
+            printf "  [Trial %2d/%2d] Conn: %s | Stat: %s | Disc: %s | SB-C: %s | SB-D: %s | NB Tot: %s\n" \
+                "$i" "$ITERATIONS" "$conn_field" "$stat_field" "$disc_field" "$sb_conn_field" "$sb_disc_field" "$total_field"
         fi
         sleep "$INTERVAL"
     done
@@ -712,9 +749,18 @@ run_lifecycle_benchmark() {
     IFS='|' read -r t_avg t_sd t_min t_max <<< "$(calc_stats $total_list)"
     IFS='|' read -r x_avg x_sd x_min x_max <<< "$(calc_stats $e2e_list)"
 
-    # When SB confirmation is disabled (simulator target, or SB_CONFIRM_MODE=off),
-    # the SB columns carry "n/a" and E2E collapses to NB Total. Emit a single
-    # literal "n/a" for each SB column, and reuse the NB Total value for E2E.
+    # calc_stats returns bare "n/a" (no "+/-") when all samples in a
+    # column were "n/a". The IFS='|' read then leaves s_sd / t_sd / x_sd
+    # empty, and the old "avg +/- sd" format would print "n/a +/- " with
+    # a dangling separator. Build each string so it becomes a clean "n/a"
+    # in that case, and only "avg +/- sd" when both numbers are real.
+
+    s_str="${s_avg} +/- ${s_sd}"
+    [ "$s_avg" = "n/a" ] && s_str="n/a"
+
+    t_str="${t_avg} +/- ${t_sd}"
+    [ "$t_avg" = "n/a" ] && t_str="n/a"
+
     if [ "$SB_CONFIRM_MODE" = "off" ] || [ "$b_avg" = "n/a" ]; then
         b_str="n/a"
         e_str="n/a"
@@ -725,7 +771,12 @@ run_lifecycle_benchmark() {
         x_str="${x_avg} +/- ${x_sd}"
     fi
 
-    echo "${mode_id}|${mode_name}|${c_avg} +/- ${c_sd}|${s_avg} +/- ${s_sd}|${d_avg} +/- ${d_sd}|${b_str}|${e_str}|${t_avg} +/- ${t_sd}|${x_str}" >> "$SUMMARY_FILE"
+    # Same treatment for x_str: collapse to bare n/a if the underlying
+    # E2E average collapsed to n/a.
+    [ "$x_avg" = "n/a" ] && x_str="n/a"
+    [ "$t_avg" = "n/a" ] && x_str="n/a"
+
+    echo "${mode_id}|${mode_name}|${c_avg} +/- ${c_sd}|${s_str}|${d_avg} +/- ${d_sd}|${b_str}|${e_str}|${t_str}|${x_str}" >> "$SUMMARY_FILE"
     echo ""
 }
 
