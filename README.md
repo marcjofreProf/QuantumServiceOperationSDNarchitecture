@@ -41,6 +41,7 @@ Extract or deploy the certificate files (client1.crt, client1.key, tls.cacrt) fr
 Option (i): Secure Copy (SCP) from Controller IP
 Ensure the certificates on the controller have read permissions, then pull them into a user folder before copying to /etc/onos/certs/:
 ```bash
+# In operational terminal:
 mkdir -p $HOME/onos/certs
 scp <username>@<controller_IP>:~/Scripts/QuantumSwitchingSDNarchitecture/.certs/uonos/client1.crt $HOME/onos/certs/
 scp <username>@<controller_IP>:~/Scripts/QuantumSwitchingSDNarchitecture/.certs/uonos/client1.key $HOME/onos/certs/
